@@ -1,5 +1,5 @@
 {
-    "name": "@budarin/base-service-worker",
+    "name": "@budarin/psw-plugin-serve-range-requests",
     "version": "1.0.0",
     "author": "Vadim Budarin",
     "description": "Service Worker plugin for @budarin/plug-in-serviceworker, which serves range requests for cached files",
