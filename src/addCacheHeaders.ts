@@ -6,7 +6,6 @@ import {
     HEADER_LAST_MODIFIED,
 } from '@budarin/http-constants/headers';
 
-// Функция для добавления заголовков кэширования (можно вынести в отдельный файл)
 export function addCacheHeaders(response: Response): Response {
     const headers = new Headers(response.headers);
 
