@@ -1,0 +1,43 @@
+{
+    "name": "@budarin/base-service-worker",
+    "version": "1.0.0",
+    "author": "Vadim Budarin",
+    "description": "Service Worker plugin for @budarin/plug-in-serviceworker, which serves range requests for cached files",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
+    "keywords": [
+        "service-worker",
+        "range-requests",
+        "cache",
+        "http",
+        "streaming"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "type": "module",
+    "peerDependencies": {
+        "@budarin/pluggable-serviceworker": "^1.0.0"
+    },
+    "dependencies": {
+        "@budarin/http-constants": "^1.0.16"
+    },
+    "devDependencies": {
+        "@budarin/pluggable-serviceworker": "^1.0.29",
+        "@types/serviceworker": "^0.0.188",
+        "@types/web": "^0.0.333",
+        "prettier": "^3.6.2",
+        "typescript": "^5.9.3"
+    },
+    "scripts": {
+        "build": "tsc",
+        "type-check": "tsc -b -noEmit",
+        "clear-caches": "sh scripts/clear-caches.sh",
+        "pnpm-install": "pnpm install",
+        "upgrade-deps": "sh scripts/upgrade-deps.sh",
+        "publish-package": "pnpm build && pnpm publish --access=public"
+    }
+}

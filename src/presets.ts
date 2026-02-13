@@ -1,0 +1,138 @@
+/**
+ * Готовые пресеты конфигураций для Request Range плагина
+ *
+ * Скопируйте нужный пресет или импортируйте этот файл:
+ * import { VIDEO_PRESET, AUDIO_PRESET } from './presets';
+ */
+
+// Device Memory API: дополняем WorkerNavigator (отсутствует в @types/web 0.0.332)
+// TODO: Убрать когда @types/web добавит поддержку WorkerNavigator.deviceMemory
+declare global {
+    interface WorkerNavigator {
+        readonly deviceMemory?: number;
+    }
+}
+
+/**
+ * 🎬 Пресет для видео файлов (ЧАСТО используется)
+ * ✅ Медиаплееры всегда используют Range запросы для перемотки и буферизации
+ */
+export const VIDEO_PRESET = {
+    include: ['*.mp4', '*.webm', '*.mkv', '*.avi', '*.mov', '*.m4v'],
+    minCacheableRangeSize: 2 * 1024 * 1024, // 2MB - крупные чанки
+    maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
+    maxCachedRanges: 30, // Мало - видео редко пересматривают
+    maxCachedMetadata: 100,
+} as const;
+
+/**
+ * 🎵 Пресет для аудио файлов (ЧАСТО используется)
+ * ✅ Аудиоплееры используют Range запросы для перемотки, особенно длинные треки
+ */
+export const AUDIO_PRESET = {
+    include: ['*.mp3', '*.flac', '*.wav', '*.m4a', '*.ogg', '*.aac'],
+    minCacheableRangeSize: 128 * 1024, // 128KB - средние чанки
+    maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
+    maxCachedRanges: 200, // Много - музыку переслушивают
+    maxCachedMetadata: 500,
+} as const;
+
+/**
+ * 🗺️ Пресет для карт и тайлов (ЧАСТО используется)
+ * ✅ Картографические библиотеки используют Range для больших тайловых файлов
+ */
+export const MAPS_PRESET = {
+    include: ['*.mbtiles', '*.pmtiles', '/tiles/*', '/maps/*', '*.mvt'],
+    minCacheableRangeSize: 4 * 1024, // 4KB - мелкие тайлы
+    maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
+    maxCachedRanges: 1000, // Очень много - тайлы переиспользуются
+    maxCachedMetadata: 200,
+} as const;
+
+/**
+ * 📚 Пресет для документов (ЧАСТО используется)
+ * ✅ PDF.js и другие PDF-вьюеры используют Range для постраничной загрузки
+ */
+export const DOCS_PRESET = {
+    include: ['*.pdf', '*.epub', '*.djvu', '*.mobi', '*.azw3'],
+    minCacheableRangeSize: 8 * 1024, // 8KB - мелкие чанки для страниц
+    maxCacheableRangeSize: 5 * 1024 * 1024, // 5MB
+    maxCachedRanges: 150, // Средне - возвраты к страницам
+    maxCachedMetadata: 50,
+} as const;
+
+/**
+ * ⚡ Адаптивные пресеты на основе характеристик устройства
+ * Автоматически адаптирует настройки под мощность устройства:
+ * - Очень слабые устройства (<2GB RAM, <2 ядра): минимальные настройки
+ * - Слабые устройства (<4GB RAM ИЛИ <4 ядра): сниженные настройки
+ * - Мощные устройства (>=4GB RAM И >=4 ядра): полные настройки
+ *
+ * Возвращает все адаптивные пресеты с суффиксом _ADAPTIVE:
+ * ✅ VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE, IMAGES_ADAPTIVE, ARCHIVES_ADAPTIVE
+ */
+export function getAdaptivePresets() {
+    // Определяем характеристики устройства
+    const deviceMemory = navigator.deviceMemory || 4; // По умолчанию 4GB если не определено
+    const hardwareConcurrency = navigator.hardwareConcurrency || 4; // По умолчанию 4 ядра
+
+    // Слабое устройство: мало памяти ИЛИ мало ядер процессора
+    const isLowEndDevice = deviceMemory < 4 || hardwareConcurrency < 4;
+
+    // Очень слабое устройство: и память и процессор слабые
+    const isVeryLowEndDevice = deviceMemory < 2 && hardwareConcurrency < 2;
+
+    if (isVeryLowEndDevice) {
+        // Очень консервативные настройки для старых/слабых устройств
+        return {
+            VIDEO_ADAPTIVE: {
+                ...VIDEO_PRESET,
+                maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
+                maxCachedRanges: 5, // Очень мало
+            },
+            AUDIO_ADAPTIVE: {
+                ...AUDIO_PRESET,
+                maxCachedRanges: 25, // Очень мало
+            },
+            MAPS_ADAPTIVE: {
+                ...MAPS_PRESET,
+                maxCachedRanges: 100, // Очень мало
+            },
+            DOCS_ADAPTIVE: {
+                ...DOCS_PRESET,
+                maxCachedRanges: 25, // Очень мало
+                maxCachedMetadata: 10,
+            },
+        };
+    } else if (isLowEndDevice) {
+        // Умеренно сниженные настройки для устройств среднего класса
+        return {
+            VIDEO_ADAPTIVE: {
+                ...VIDEO_PRESET,
+                maxCacheableRangeSize: 10 * 1024 * 1024, // 10MB вместо 20MB
+                maxCachedRanges: 20, // Умеренно меньше
+            },
+            AUDIO_ADAPTIVE: {
+                ...AUDIO_PRESET,
+                maxCachedRanges: 150, // Умеренно меньше
+            },
+            MAPS_ADAPTIVE: {
+                ...MAPS_PRESET,
+                maxCachedRanges: 750, // Умеренно меньше
+            },
+            DOCS_ADAPTIVE: {
+                ...DOCS_PRESET,
+                maxCachedRanges: 100, // Умеренно меньше
+                maxCachedMetadata: 35,
+            },
+        };
+    }
+
+    // Мощное устройство (>=4GB RAM и >=4 ядра) - используем полные настройки
+    return {
+        VIDEO_ADAPTIVE: VIDEO_PRESET,
+        AUDIO_ADAPTIVE: AUDIO_PRESET,
+        MAPS_ADAPTIVE: MAPS_PRESET,
+        DOCS_ADAPTIVE: DOCS_PRESET,
+    };
+}

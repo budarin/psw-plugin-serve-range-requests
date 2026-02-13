@@ -1,0 +1,9 @@
+.vscode
+.prettierrc.mjs
+.prettierignore
+tsconfig.json
+src/
+.gitignore
+README.md
+TODO.md
+pnpm-lock.yaml

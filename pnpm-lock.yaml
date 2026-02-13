@@ -1,0 +1,69 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@budarin/http-constants':
+        specifier: ^1.0.16
+        version: 1.0.21
+    devDependencies:
+      '@budarin/pluggable-serviceworker':
+        specifier: ^1.0.29
+        version: 1.8.1
+      '@types/serviceworker':
+        specifier: ^0.0.188
+        version: 0.0.188
+      '@types/web':
+        specifier: ^0.0.333
+        version: 0.0.333
+      prettier:
+        specifier: ^3.6.2
+        version: 3.8.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+packages:
+
+  '@budarin/http-constants@1.0.21':
+    resolution: {integrity: sha512-sNJFSxI4sJicOHIlzj+/DkW0m8z8FicqwYHwx/hwjMft66NnuGR/d7KHKB2DeE+ItPJQthUYuGU0k9xFcY/vcg==}
+
+  '@budarin/pluggable-serviceworker@1.8.1':
+    resolution: {integrity: sha512-LHLZjd62ZwH1o3Jy34xdQXro1zO9JWBPCJHsXD7f9jgBoClbk3z0clMkN7FBCUMbZMwtp1Hi3mRR0e5Jcz1pMA==}
+
+  '@types/serviceworker@0.0.188':
+    resolution: {integrity: sha512-9uISyTRVNP9hg7W+lBw8aZHay9KaSx7cZKNI4xcEc/SiAlruAZ6nwuV3kWIEs3U4nuUzKbS+wPn6TrVXYOi8OA==}
+
+  '@types/web@0.0.333':
+    resolution: {integrity: sha512-TuXKfauSO7ktyEPwC74/ktILtk8xaZZQ7eUkaomiYwEwBPrmjP9C9ZJcZFOSZOM8PnX3WnsT0qdX1oZ2jXZg2A==}
+
+  prettier@3.8.1:
+    resolution: {integrity: sha512-UOnG6LftzbdaHZcKoPFtOcCKztrQ57WkHDeRD9t/PTQtmT0NHSeWWepj6pS0z/N7+08BHFDQVUrfmfMRcZwbMg==}
+    engines: {node: '>=14'}
+    hasBin: true
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+snapshots:
+
+  '@budarin/http-constants@1.0.21': {}
+
+  '@budarin/pluggable-serviceworker@1.8.1':
+    dependencies:
+      '@budarin/http-constants': 1.0.21
+
+  '@types/serviceworker@0.0.188': {}
+
+  '@types/web@0.0.333': {}
+
+  prettier@3.8.1: {}
+
+  typescript@5.9.3: {}
