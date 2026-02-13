@@ -28,7 +28,8 @@
         "skipLibCheck": true,
         "esModuleInterop": true,
         "declaration": true,
-        "noEmit": false
+        "noEmit": false,
+        "removeComments": true
     },
     "include": ["src/**/*"]
 }
