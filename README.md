@@ -1,8 +1,14 @@
 # @budarin/psw-plugin-serve-range-requests
 
-[Русская версия](https://github.com/budarin/psw-plugin-serve-root-from-asset/blob/master/README.ru.md)
+[Русская версия](https://github.com/budarin/psw-plugin-serve-range-requests/blob/master/README.ru.md)
 
 Service Worker plugin for `@budarin/pluggable-serviceworker` that serves HTTP Range requests for cached files.
+
+[![CI](https://github.com/budarin/psw-plugin-serve-range-requests/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/budarin/psw-plugin-serve-range-requests/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@budarin/psw-plugin-serve-range-requests?color=cb0000)](https://www.npmjs.com/package/@budarin/psw-plugin-serve-range-requests)
+[![npm](https://img.shields.io/npm/dt/@budarin/psw-plugin-serve-range-requests)](https://www.npmjs.com/package/@budarin/psw-plugin-serve-range-requests)
+[![bundle](https://img.shields.io/bundlephobia/minzip/@budarin/psw-plugin-serve-range-requests)](https://bundlephobia.com/result?p=@budarin/psw-plugin-serve-range-requests)
+[![GitHub](https://img.shields.io/github/license/budarin/psw-plugin-serve-range-requests)](https://github.com/budarin/psw-plugin-serve-range-requests)
 
 ## Quick start
 
