@@ -135,3 +135,7 @@ initServiceWorker({
 ---
 
 **Tip**: In most cases it is enough to configure `cacheName` and a few `include` patterns.
+
+## 🤝 License
+
+MIT © budarin
