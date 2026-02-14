@@ -8,21 +8,40 @@ import {
     HEADER_CONTENT_TYPE,
     HEADER_CONTENT_RANGE,
     HEADER_CONTENT_LENGTH,
+    HEADER_ETAG,
+    HEADER_LAST_MODIFIED,
 } from '@budarin/http-constants/headers';
 
 import { HTTP_STATUS_PARTIAL_CONTENT } from '@budarin/http-constants/statuses';
 import { MIME_APPLICATION_OCTET_STREAM } from '@budarin/http-constants/mime-types';
 
 import { addCacheHeaders } from './addCacheHeaders.js';
+import {
+    type Range,
+    parseRangeHeader,
+    ifRangeMatches,
+    shouldCacheRange,
+    shouldProcessFile,
+} from './rangeUtils.js';
 
-interface Range {
-    start: number;
-    end: number;
-}
+export {
+    VIDEO_PRESET,
+    AUDIO_PRESET,
+    MAPS_PRESET,
+    DOCS_PRESET,
+    getAdaptivePresets,
+} from './presets.js';
 
 interface CachedRange {
     data: ArrayBuffer;
     headers: Headers;
+}
+
+interface FileMetadata {
+    size: number;
+    type: string;
+    etag?: string;
+    lastModified?: string;
 }
 
 export interface RangePluginOptions {
@@ -49,15 +68,10 @@ export interface RangePluginOptions {
      */
     enableLogging?: boolean;
     /**
-     * Максимальный размер диапазона для кеширования в байтах (по умолчанию 10MB)
-     * Диапазоны больше этого размера не будут кешироваться
+     * Максимальный размер одной кешируемой записи (диапазона) в байтах (по умолчанию 10MB).
+     * Диапазоны больше этого размера не кешируются — защита от переполнения памяти.
      */
     maxCacheableRangeSize?: number;
-    /**
-     * Минимальный размер диапазона для кеширования в байтах (по умолчанию 1KB)
-     * Диапазоны меньше этого размера не будут кешироваться
-     */
-    minCacheableRangeSize?: number;
     /**
      * Маски файлов для обработки (glob паттерны)
      * Если указано, плагин будет обрабатывать только файлы, соответствующие этим маскам
@@ -70,65 +84,20 @@ export interface RangePluginOptions {
      * Примеры: ['*.json'], ['/small-files/*']
      */
     exclude?: string[];
+    /**
+     * Значение заголовка Cache-Control для ответов 206.
+     * По умолчанию `max-age=31536000, immutable` — браузер кеширует ответ надолго.
+     * Можно задать свою строку (например `no-store`, `max-age=3600`) или пустую, чтобы не выставлять.
+     */
+    rangeResponseCacheControl?: string;
 }
 
 /**
- * Плагин для обработки HTTP Range запросов
- *
- * Этот плагин обрабатывает запросы с заголовком Range и возвращает
- * частичное содержимое файлов из кеша Service Worker'а.
+ * Плагин для обработки HTTP Range запросов: отдаёт частичное содержимое файлов из кеша SW.
  *
  * @param options - Опции конфигурации плагина
  * @returns ServiceWorkerPlugin для обработки Range запросов
  */
-/**
- * Проверяет, соответствует ли URL указанному glob паттерну
- */
-function matchesGlob(url: string, pattern: string): boolean {
-    // Получаем pathname из URL
-    const pathname = new URL(url, 'https://example.com').pathname;
-
-    // Преобразуем glob паттерн в регулярное выражение
-    const regexPattern = pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Экранируем спецсимволы regex
-        .replace(/\*/g, '.*') // * -> .*
-        .replace(/\?/g, '.'); // ? -> .
-
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(pathname);
-}
-
-/**
- * Проверяет, должен ли файл обрабатываться на основе include/exclude масок
- */
-function shouldProcessFile(
-    url: string,
-    include?: string[],
-    exclude?: string[]
-): boolean {
-    // Если есть exclude маски, проверяем исключения
-    if (exclude && exclude.length > 0) {
-        for (const pattern of exclude) {
-            if (matchesGlob(url, pattern)) {
-                return false; // Файл исключен
-            }
-        }
-    }
-
-    // Если есть include маски, файл должен соответствовать хотя бы одной
-    if (include && include.length > 0) {
-        for (const pattern of include) {
-            if (matchesGlob(url, pattern)) {
-                return true; // Файл включен
-            }
-        }
-        return false; // Файл не соответствует ни одной include маске
-    }
-
-    // Если нет include масок, но прошел exclude проверку - обрабатываем
-    return true;
-}
-
 export function serveRangeRequests(
     options: RangePluginOptions
 ): ServiceWorkerPlugin {
@@ -139,66 +108,17 @@ export function serveRangeRequests(
         maxCachedMetadata = 200,
         enableLogging = false,
         maxCacheableRangeSize = 10 * 1024 * 1024, // 10MB
-        minCacheableRangeSize = 1024, // 1KB
         include,
         exclude,
+        rangeResponseCacheControl = 'max-age=31536000, immutable',
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
     const rangeCache = new Map<string, CachedRange>();
     // Кеш метаданных файлов
-    const fileMetadataCache = new Map<string, { size: number; type: string }>();
+    const fileMetadataCache = new Map<string, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
-
-    /**
-     * Парсит заголовок Range и возвращает диапазон байтов
-     */
-    function parseRangeHeader(rangeHeader: string, fullSize: number): Range {
-        const trimmedHeader = rangeHeader.trim();
-
-        // Поддерживаем два формата:
-        // 1. bytes=start-end или bytes=start-
-        // 2. bytes=-suffix (последние N байт)
-
-        // Суффиксный range: bytes=-500
-        const suffixMatch = /^bytes=-(\d+)$/.exec(trimmedHeader);
-        if (suffixMatch) {
-            const suffixLength = parseInt(suffixMatch[1]!, 10);
-            if (isNaN(suffixLength) || suffixLength <= 0) {
-                throw new Error('Invalid suffix range value');
-            }
-
-            const start = Math.max(0, fullSize - suffixLength);
-            const end = fullSize - 1;
-
-            return { start, end };
-        }
-
-        // Обычный range: bytes=start-end или bytes=start-
-        const rangeMatch = /^bytes=(\d+)-(\d*)$/.exec(trimmedHeader);
-        if (!rangeMatch) {
-            throw new Error('Invalid or unsupported range header format');
-        }
-
-        const start = parseInt(rangeMatch[1]!, 10);
-        const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : fullSize - 1;
-
-        // Валидация диапазона
-        if (isNaN(start) || isNaN(end)) {
-            throw new Error('Invalid range values');
-        }
-
-        if (start < 0 || start >= fullSize) {
-            throw new Error('Range start is out of bounds');
-        }
-
-        if (end < start || end >= fullSize) {
-            throw new Error('Range end is out of bounds');
-        }
-
-        return { start, end };
-    }
 
     /**
      * Читает указанный диапазон байтов из потока
@@ -262,11 +182,11 @@ export function serveRangeRequests(
     }
 
     /**
-     * Получает метаданные файла из кеша
+     * Получает метаданные файла из кеша (размер, тип, ETag, Last-Modified при наличии)
      */
     async function getFileMetadata(
         url: string
-    ): Promise<{ size: number; type: string } | undefined> {
+    ): Promise<FileMetadata | undefined> {
         if (fileMetadataCache.has(url)) {
             return fileMetadataCache.get(url);
         }
@@ -290,11 +210,17 @@ export function serveRangeRequests(
                 return; // Некорректный размер файла
             }
 
-            const metadata = {
+            const etag = response.headers.get(HEADER_ETAG) ?? undefined;
+            const lastModified =
+                response.headers.get(HEADER_LAST_MODIFIED) ?? undefined;
+
+            const metadata: FileMetadata = {
                 size,
                 type:
                     response.headers.get(HEADER_CONTENT_TYPE) ??
                     MIME_APPLICATION_OCTET_STREAM,
+                ...(etag && { etag }),
+                ...(lastModified && { lastModified }),
             };
 
             manageMetadataCacheSize();
@@ -359,17 +285,6 @@ export function serveRangeRequests(
         return cached;
     }
 
-    /**
-     * Определяет, стоит ли кешировать данный диапазон
-     */
-    function shouldCacheRange(range: Range): boolean {
-        const rangeSize = range.end - range.start + 1;
-        return (
-            rangeSize >= minCacheableRangeSize &&
-            rangeSize <= maxCacheableRangeSize
-        );
-    }
-
     return {
         name: 'range-requests',
         order,
@@ -398,19 +313,6 @@ export function serveRangeRequests(
                 return;
             }
 
-            // Проверяем условные заголовки
-            const ifRangeHeader = request.headers.get('If-Range');
-            if (ifRangeHeader) {
-                // Если есть If-Range, нужно проверить ETag/Last-Modified
-                // Для упрощения пропускаем такие запросы
-                if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: skipping request with If-Range header for ${request.url}`
-                    );
-                }
-                return;
-            }
-
             const url = request.url;
             const cacheKey = `${url}|${rangeHeader}`;
 
@@ -422,12 +324,28 @@ export function serveRangeRequests(
                     headers,
                     status: HTTP_STATUS_PARTIAL_CONTENT,
                 });
-                return addCacheHeaders(response);
+                return addCacheHeaders(response, rangeResponseCacheControl);
             }
 
             // Получаем метаданные файла
             const metadata = await getFileMetadata(url);
             if (!metadata) {
+                if (enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: skipping ${url} (file not in cache or no metadata)`
+                    );
+                }
+                return;
+            }
+
+            // If-Range: отдаём из кеша только если валидатор совпадает с сохранённым
+            const ifRangeHeader = request.headers.get('If-Range');
+            if (ifRangeHeader && !ifRangeMatches(ifRangeHeader, metadata)) {
+                if (enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: skipping ${url} (If-Range does not match cached validator)`
+                    );
+                }
                 return;
             }
 
@@ -439,6 +357,11 @@ export function serveRangeRequests(
                 const cache = await getCache();
                 const cachedResponse = await cache.match(url);
                 if (!cachedResponse?.body) {
+                    if (enableLogging) {
+                        console.log(
+                            `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
+                        );
+                    }
                     return;
                 }
 
@@ -456,7 +379,7 @@ export function serveRangeRequests(
                 });
 
                 // Кешируем range-ответ только если он подходящего размера
-                if (shouldCacheRange(range)) {
+                if (shouldCacheRange(range, maxCacheableRangeSize)) {
                     manageCacheSize();
                     rangeCache.set(cacheKey, { data, headers });
 
@@ -469,7 +392,7 @@ export function serveRangeRequests(
                 } else if (enableLogging) {
                     const rangeSize = range.end - range.start + 1;
                     console.log(
-                        `serveRangeRequests plugin: skipped caching for ${url}, size: ${rangeSize} bytes (out of cache range)`
+                        `serveRangeRequests plugin: skipped caching for ${url}, size: ${rangeSize} bytes (exceeds maxCacheableRangeSize)`
                     );
                 }
 
@@ -479,7 +402,7 @@ export function serveRangeRequests(
                     headers,
                 });
 
-                return addCacheHeaders(response);
+                return addCacheHeaders(response, rangeResponseCacheControl);
             } catch (error) {
                 // Логируем ошибку и возвращаем undefined, чтобы передать управление следующему плагину
                 if (enableLogging) {

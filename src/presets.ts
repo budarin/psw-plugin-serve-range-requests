@@ -19,9 +19,8 @@ declare global {
  */
 export const VIDEO_PRESET = {
     include: ['*.mp4', '*.webm', '*.mkv', '*.avi', '*.mov', '*.m4v'],
-    minCacheableRangeSize: 2 * 1024 * 1024, // 2MB - крупные чанки
-    maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
-    maxCachedRanges: 30, // Мало - видео редко пересматривают
+    maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB — верхняя граница одной записи
+    maxCachedRanges: 30,
     maxCachedMetadata: 100,
 } as const;
 
@@ -31,9 +30,8 @@ export const VIDEO_PRESET = {
  */
 export const AUDIO_PRESET = {
     include: ['*.mp3', '*.flac', '*.wav', '*.m4a', '*.ogg', '*.aac'],
-    minCacheableRangeSize: 128 * 1024, // 128KB - средние чанки
     maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
-    maxCachedRanges: 200, // Много - музыку переслушивают
+    maxCachedRanges: 200,
     maxCachedMetadata: 500,
 } as const;
 
@@ -43,9 +41,8 @@ export const AUDIO_PRESET = {
  */
 export const MAPS_PRESET = {
     include: ['*.mbtiles', '*.pmtiles', '/tiles/*', '/maps/*', '*.mvt'],
-    minCacheableRangeSize: 4 * 1024, // 4KB - мелкие тайлы
     maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
-    maxCachedRanges: 1000, // Очень много - тайлы переиспользуются
+    maxCachedRanges: 1000,
     maxCachedMetadata: 200,
 } as const;
 
@@ -55,9 +52,8 @@ export const MAPS_PRESET = {
  */
 export const DOCS_PRESET = {
     include: ['*.pdf', '*.epub', '*.djvu', '*.mobi', '*.azw3'],
-    minCacheableRangeSize: 8 * 1024, // 8KB - мелкие чанки для страниц
     maxCacheableRangeSize: 5 * 1024 * 1024, // 5MB
-    maxCachedRanges: 150, // Средне - возвраты к страницам
+    maxCachedRanges: 150,
     maxCachedMetadata: 50,
 } as const;
 
@@ -69,7 +65,7 @@ export const DOCS_PRESET = {
  * - Мощные устройства (>=4GB RAM И >=4 ядра): полные настройки
  *
  * Возвращает все адаптивные пресеты с суффиксом _ADAPTIVE:
- * ✅ VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE, IMAGES_ADAPTIVE, ARCHIVES_ADAPTIVE
+ * ✅ VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE
  */
 export function getAdaptivePresets() {
     // Определяем характеристики устройства
@@ -88,7 +84,7 @@ export function getAdaptivePresets() {
             VIDEO_ADAPTIVE: {
                 ...VIDEO_PRESET,
                 maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
-                maxCachedRanges: 5, // Очень мало
+                maxCachedRanges: 5,
             },
             AUDIO_ADAPTIVE: {
                 ...AUDIO_PRESET,
@@ -109,8 +105,8 @@ export function getAdaptivePresets() {
         return {
             VIDEO_ADAPTIVE: {
                 ...VIDEO_PRESET,
-                maxCacheableRangeSize: 10 * 1024 * 1024, // 10MB вместо 20MB
-                maxCachedRanges: 20, // Умеренно меньше
+                maxCacheableRangeSize: 10 * 1024 * 1024, // 10MB
+                maxCachedRanges: 20,
             },
             AUDIO_ADAPTIVE: {
                 ...AUDIO_PRESET,
@@ -128,7 +124,7 @@ export function getAdaptivePresets() {
         };
     }
 
-    // Мощное устройство (>=4GB RAM и >=4 ядра) - используем полные настройки
+    // Мощное устройство (>=4GB RAM и >=4 ядра) — полные настройки
     return {
         VIDEO_ADAPTIVE: VIDEO_PRESET,
         AUDIO_ADAPTIVE: AUDIO_PRESET,

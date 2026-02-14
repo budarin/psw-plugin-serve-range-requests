@@ -5,14 +5,17 @@ on:
         branches: [master, main]
         paths:
             - 'src/**'
+            - 'tests/**'
             - 'package.json'
             - 'pnpm-lock.yaml'
             - 'tsconfig.json'
+            - 'vitest.config.ts'
             - '.github/workflows/ci.yml'
     pull_request:
         branches: [master, main]
         paths:
             - 'src/**'
+            - 'tests/**'
             - 'package.json'
             - 'pnpm-lock.yaml'
             - 'tsconfig.json'
@@ -41,6 +44,9 @@ jobs:
 
             - name: Type check
               run: pnpm run type-check
+
+            - name: Test
+              run: pnpm test
 
             - name: Build
               run: pnpm run build

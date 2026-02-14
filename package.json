@@ -1,6 +1,6 @@
 {
     "name": "@budarin/psw-plugin-serve-range-requests",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "author": "Vadim Budarin",
     "description": "Service Worker plugin for @budarin/pluggable-serviceworker that serves HTTP Range requests for cached files",
     "files": [
@@ -30,11 +30,14 @@
         "@types/serviceworker": "^0.0.188",
         "@types/web": "^0.0.333",
         "prettier": "^3.6.2",
-        "typescript": "^5.9.3"
+        "typescript": "^5.9.3",
+        "vitest": "^2.1.0"
     },
     "scripts": {
         "build": "tsc",
         "type-check": "tsc -b -noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "clear-caches": "sh scripts/clear-caches.sh",
         "pnpm-install": "pnpm install",
         "upgrade-deps": "sh scripts/upgrade-deps.sh",

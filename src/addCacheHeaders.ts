@@ -6,10 +6,17 @@ import {
     HEADER_LAST_MODIFIED,
 } from '@budarin/http-constants/headers';
 
-export function addCacheHeaders(response: Response): Response {
+const DEFAULT_CACHE_CONTROL = 'max-age=31536000, immutable';
+
+export function addCacheHeaders(
+    response: Response,
+    cacheControl: string = DEFAULT_CACHE_CONTROL
+): Response {
     const headers = new Headers(response.headers);
 
-    headers.set(HEADER_CACHE_CONTROL, 'max-age=31536000, immutable');
+    if (cacheControl) {
+        headers.set(HEADER_CACHE_CONTROL, cacheControl);
+    }
     headers.delete(HEADER_EXPIRES);
     headers.delete(HEADER_PRAGMA);
     headers.delete(HEADER_ETAG);

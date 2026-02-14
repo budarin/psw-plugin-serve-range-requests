@@ -37,22 +37,25 @@ serveRangeRequests({
 | `maxCachedRanges`       | `number`   | `100`   | Max number of cached ranges (see below) |
 | `maxCachedMetadata`     | `number`   | `200`   | Max number of files to keep metadata for (see below) |
 | `maxCacheableRangeSize` | `number`   | `10MB`  | Max size of a single cached range (see below) |
-| `minCacheableRangeSize` | `number`   | `1KB`   | Min range size to cache (see below) |
 | `include`               | `string[]` | -       | File glob patterns to include         |
 | `exclude`               | `string[]` | -       | File glob patterns to exclude         |
+| `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
 | `enableLogging`         | `boolean`  | `false` | Verbose logging                       |
 
 **Metadata cache (`maxCachedMetadata`)**  
 The plugin keeps metadata for files it has already served so that repeat Range requests to the same file are faster. Set this to roughly how many **different** files of this type users typically open or play in a session. If they often switch between many items (e.g. a long playlist, a large document list), use a higher value (hundreds). If they usually work with just a few files at a time, a lower value (tens) is enough. File size does not affect this limit—only the number of distinct URLs matters.
 
-**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`, `minCacheableRangeSize`)**  
-The plugin can store ready-made responses for byte ranges that were already requested, so that repeated seeks to the same part of a file (e.g. rewind, replaying a section) are served from memory. **maxCachedRanges** is how many such ranges to keep: if users often jump back to the same parts (replay a chorus, re-read a PDF page), use a higher value; if they mostly consume content once and linearly, a lower value is enough—each entry uses memory. **maxCacheableRangeSize** should be at least as large as the typical range size your players request: video players often request multi-MB chunks, document or tile viewers smaller ones (tens of KB to a few MB); too low and large requests won’t be cached, too high and each cached range uses a lot of memory. **minCacheableRangeSize** is the minimum range size worth caching; very small ranges can be left uncached to save memory—set this to the smallest chunk size you still want to cache (e.g. your tile size or minimum useful segment).
+**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**  
+The plugin caches every range response it serves, so that repeated requests for the same part of a file (e.g. rewind, replay) are served from memory. Eviction is LRU: the least recently used entries are dropped when the limit is reached. **maxCachedRanges** is how many range responses to keep—more if users often jump back to the same parts. **maxCacheableRangeSize** is only an upper cap: ranges larger than this are not cached (to avoid one huge entry using too much memory). There is no minimum size—any requested range that fits under the cap is cached.
+
+**206 responses and browser cache**  
+By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).
 
 When choosing option values, focus on the real traffic profile of your resources. You can inspect and analyze all requests to your assets in the browser DevTools `Network` panel.
 
 ## Important notes
 
-⚠️ **Do not cache huge files and ranges** – mobile devices may not handle them well.
+⚠️ **Do not cache huge files and ranges** – mobile devices may not handle them well. Range data is read sequentially from the cached file stream (Cache API does not support random access), so requesting a range near the end of a very large file can be slow; prefer smaller assets or lower `maxCacheableRangeSize` for large files.
 
 ## Usage example
 
@@ -134,9 +137,10 @@ initServiceWorker({
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. Reads the requested byte range from the file.
-4. Caches the ready‑to‑use partial response.
-5. Returns HTTP `206 Partial Content`.
+3. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
+4. Reads the requested byte range from the file.
+5. Caches the ready‑to‑use partial response.
+6. Returns HTTP `206 Partial Content`.
 
 ---
 
