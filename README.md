@@ -34,13 +34,19 @@ serveRangeRequests({
 | ----------------------- | ---------- | ------- | ------------------------------------- |
 | `cacheName`             | `string`   | -       | **Required.** Cache name              |
 | `order`                 | `number`   | `-10`   | Plugin execution order (optional)     |
-| `maxCachedRanges`       | `number`   | `100`   | Max number of cached ranges           |
-| `maxCachedMetadata`     | `number`   | `200`   | Max number of cached metadata entries |
-| `maxCacheableRangeSize` | `number`   | `10MB`  | Maximum size of a single cached range |
-| `minCacheableRangeSize` | `number`   | `1KB`   | Minimum size of a range to be cached  |
+| `maxCachedRanges`       | `number`   | `100`   | Max number of cached ranges (see below) |
+| `maxCachedMetadata`     | `number`   | `200`   | Max number of files to keep metadata for (see below) |
+| `maxCacheableRangeSize` | `number`   | `10MB`  | Max size of a single cached range (see below) |
+| `minCacheableRangeSize` | `number`   | `1KB`   | Min range size to cache (see below) |
 | `include`               | `string[]` | -       | File glob patterns to include         |
 | `exclude`               | `string[]` | -       | File glob patterns to exclude         |
 | `enableLogging`         | `boolean`  | `false` | Verbose logging                       |
+
+**Metadata cache (`maxCachedMetadata`)**  
+The plugin keeps metadata for files it has already served so that repeat Range requests to the same file are faster. Set this to roughly how many **different** files of this type users typically open or play in a session. If they often switch between many items (e.g. a long playlist, a large document list), use a higher value (hundreds). If they usually work with just a few files at a time, a lower value (tens) is enough. File size does not affect this limit—only the number of distinct URLs matters.
+
+**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`, `minCacheableRangeSize`)**  
+The plugin can store ready-made responses for byte ranges that were already requested, so that repeated seeks to the same part of a file (e.g. rewind, replaying a section) are served from memory. **maxCachedRanges** is how many such ranges to keep: if users often jump back to the same parts (replay a chorus, re-read a PDF page), use a higher value; if they mostly consume content once and linearly, a lower value is enough—each entry uses memory. **maxCacheableRangeSize** should be at least as large as the typical range size your players request: video players often request multi-MB chunks, document or tile viewers smaller ones (tens of KB to a few MB); too low and large requests won’t be cached, too high and each cached range uses a lot of memory. **minCacheableRangeSize** is the minimum range size worth caching; very small ranges can be left uncached to save memory—set this to the smallest chunk size you still want to cache (e.g. your tile size or minimum useful segment).
 
 When choosing option values, focus on the real traffic profile of your resources. You can inspect and analyze all requests to your assets in the browser DevTools `Network` panel.
 
