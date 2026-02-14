@@ -70,7 +70,7 @@ describe('parseRangeHeader', () => {
 
     it('пустой файл (fullSize=0)', () => {
         expect(() => parseRangeHeader('bytes=0-0', 0)).toThrow(
-            'Range end is out of bounds'
+            'Range start is out of bounds'
         );
     });
 });
@@ -122,11 +122,11 @@ describe('shouldCacheRange', () => {
 
     it('размер в пределах лимита — true', () => {
         expect(shouldCacheRange({ start: 0, end: 99 }, max)).toBe(true);
-        expect(shouldCacheRange({ start: 0, end: 100 }, max)).toBe(true);
+        // (0, 99) = 100 байт — в лимите; (0, 100) = 101 байт — уже выше max
     });
 
     it('размер больше лимита — false', () => {
-        expect(shouldCacheRange({ start: 0, end: 100 }, max)).toBe(true);
+        expect(shouldCacheRange({ start: 0, end: 100 }, max)).toBe(false);
         expect(shouldCacheRange({ start: 0, end: 101 }, max)).toBe(false);
     });
 });
