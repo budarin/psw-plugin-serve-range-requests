@@ -46,7 +46,7 @@ serveRangeRequests({
 The plugin keeps metadata for files it has already served so that repeat Range requests to the same file are faster. Set this to roughly how many **different** files of this type users typically open or play in a session. If they often switch between many items (e.g. a long playlist, a large document list), use a higher value (hundreds). If they usually work with just a few files at a time, a lower value (tens) is enough. File size does not affect this limit—only the number of distinct URLs matters.
 
 **Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**  
-The plugin caches every range response it serves, so that repeated requests for the same part of a file (e.g. rewind, replay) are served from memory. Eviction is LRU: the least recently used entries are dropped when the limit is reached. **maxCachedRanges** is how many range responses to keep—more if users often jump back to the same parts. **maxCacheableRangeSize** is only an upper cap: ranges larger than this are not cached (to avoid one huge entry using too much memory). There is no minimum size—any requested range that fits under the cap is cached.
+The plugin caches every range response it serves, so that repeated requests for the same part of a file (e.g. rewind, replay) are served from memory. Eviction is LRU: when the limit is reached, the least recently used (oldest) entries are dropped. **maxCachedRanges** is how many range responses to keep—more if users often jump back to the same parts. **maxCacheableRangeSize** is only an upper cap: ranges larger than this are not cached (to avoid one huge entry using too much memory). There is no minimum size—any requested range that fits under the cap is cached.
 
 **206 responses and browser cache**  
 By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).
@@ -55,7 +55,7 @@ When choosing option values, focus on the real traffic profile of your resources
 
 ## Important notes
 
-⚠️ **Do not cache huge files and ranges** – mobile devices may not handle them well. Range data is read sequentially from the cached file stream (Cache API does not support random access), so requesting a range near the end of a very large file can be slow; prefer smaller assets or lower `maxCacheableRangeSize` for large files.
+⚠️ **Do not cache huge files and ranges** – mobile devices may not handle them well. Range data is read sequentially from the cached file stream (Cache API does not support random access), so requesting a range near the end of a very large file can be slow; prefer smaller assets.
 
 ## Usage example
 
