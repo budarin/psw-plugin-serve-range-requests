@@ -3,11 +3,7 @@
     "version": "1.0.6",
     "author": "Vadim Budarin",
     "description": "Service Worker plugin for @budarin/pluggable-serviceworker that serves HTTP Range requests for cached files",
-    "files": [
-        "dist",
-        "LICENSE",
-        "README.md"
-    ],
+    "license": "MIT",
     "keywords": [
         "service-worker",
         "range-requests",
@@ -15,7 +11,11 @@
         "http",
         "streaming"
     ],
-    "license": "MIT",
+    "files": [
+        "dist",
+        "LICENSE",
+        "README.md"
+    ],
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "type": "module",
@@ -27,11 +27,11 @@
     },
     "devDependencies": {
         "@budarin/pluggable-serviceworker": "^1.0.29",
-        "@types/serviceworker": "^0.0.188",
-        "@types/web": "^0.0.333",
+        "@types/serviceworker": "^0.0.190",
+        "@types/web": "^0.0.335",
         "prettier": "^3.6.2",
         "typescript": "^5.9.3",
-        "vitest": "^2.1.0"
+        "vitest": "^4.0.18"
     },
     "scripts": {
         "build": "tsc",
