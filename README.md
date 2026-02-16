@@ -63,8 +63,8 @@ When choosing option values, focus on the real traffic profile of your resources
 import { initServiceWorker } from '@budarin/pluggable-serviceworker';
 import { serveRangeRequests } from '@budarin/psw-plugin-serve-range-requests';
 
-initServiceWorker({
-    plugins: [
+initServiceWorker(
+    [
         serveRangeRequests({
             cacheName: 'media-cache',
             include: ['*.mp4', '*.webm', '*.mkv'], // Video
@@ -78,7 +78,8 @@ initServiceWorker({
             maxCachedRanges: 200,
         }),
     ],
-});
+    { version: '1.0.0' }
+);
 ```
 
 ## Built‑in presets (optional)
@@ -93,17 +94,20 @@ If you don’t want to tune all the options manually, you can use ready‑made p
 - **DOCS_PRESET** – for documents: `*.pdf`, `*.epub`, `*.djvu`, `*.mobi`, `*.azw3`
 
 ```typescript
+import { initServiceWorker } from '@budarin/pluggable-serviceworker';
 import {
+    serveRangeRequests,
     VIDEO_PRESET,
     AUDIO_PRESET,
 } from '@budarin/psw-plugin-serve-range-requests';
 
-initServiceWorker({
-    plugins: [
+initServiceWorker(
+    [
         serveRangeRequests({ ...VIDEO_PRESET, cacheName: 'video-cache' }),
         serveRangeRequests({ ...AUDIO_PRESET, cacheName: 'audio-cache' }),
     ],
-});
+    { version: '1.0.0' }
+);
 ```
 
 ### Adaptive presets
@@ -111,19 +115,27 @@ initServiceWorker({
 All the presets above can be adapted to the device capabilities. On devices with low RAM and weak CPUs, the limits are automatically decreased to keep the app responsive.
 
 ```typescript
-import { getAdaptivePresets } from '@budarin/psw-plugin-serve-range-requests';
+import { initServiceWorker } from '@budarin/pluggable-serviceworker';
+import {
+    serveRangeRequests,
+    getAdaptivePresets,
+} from '@budarin/psw-plugin-serve-range-requests';
 
 // Automatically adapts to device performance:
-// - Low-end devices (<4GB RAM or <4 CPU cores): reduced limits
-// - More powerful devices (>=4GB RAM and >=4 CPU cores): full limits
-const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE } = getAdaptivePresets();
+// - Very low-end (<2GB RAM and <2 CPU cores): minimal limits
+// - Low-end (<4GB RAM or <4 CPU cores): reduced limits
+// - More powerful (>=4GB RAM and >=4 CPU cores): full preset settings
+const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } = getAdaptivePresets();
 
-initServiceWorker({
-    plugins: [
+initServiceWorker(
+    [
         serveRangeRequests({ ...VIDEO_ADAPTIVE, cacheName: 'video-cache' }),
         serveRangeRequests({ ...AUDIO_ADAPTIVE, cacheName: 'audio-cache' }),
+        serveRangeRequests({ ...MAPS_ADAPTIVE, cacheName: 'maps-cache' }),
+        serveRangeRequests({ ...DOCS_ADAPTIVE, cacheName: 'docs-cache' }),
     ],
-});
+    { version: '1.0.0' }
+);
 ```
 
 ## Supported Range formats

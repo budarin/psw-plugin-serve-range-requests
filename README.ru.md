@@ -1,6 +1,8 @@
 # @budarin/psw-plugin-serve-range-requests
 
-Плагин Service Worker для @budarin/plug-in-serviceworker, который обслуживает range запросы для кэшированных файлов
+[English](https://github.com/budarin/psw-plugin-serve-range-requests/blob/master/README.md)
+
+Плагин Service Worker для `@budarin/pluggable-serviceworker`, который обслуживает HTTP Range запросы для кэшированных файлов.
 
 ## Быстрый старт
 
@@ -55,8 +57,8 @@ serveRangeRequests({
 import { initServiceWorker } from '@budarin/pluggable-serviceworker';
 import { serveRangeRequests } from '@budarin/psw-plugin-serve-range-requests';
 
-initServiceWorker({
-    plugins: [
+initServiceWorker(
+    [
         serveRangeRequests({
             cacheName: 'media-cache',
             include: ['*.mp4', '*.webm', '*.mkv'], // Видео
@@ -70,52 +72,64 @@ initServiceWorker({
             maxCachedRanges: 200,
         }),
     ],
-});
+    { version: '1.0.0' }
+);
 ```
 
 ## Готовые пресеты (опционально)
 
 Если не хотите настраивать параметры вручную, используйте готовые пресеты:
 
-### Доступные пресеты:
+### Доступные пресеты
 
-- **VIDEO_PRESET** - для медиаплееров: `*.mp4`, `*.webm`, `*.mkv`, `*.avi`, `*.mov`, `*.m4v`
-- **AUDIO_PRESET** - для аудиоплееров: `*.mp3`, `*.flac`, `*.wav`, `*.m4a`, `*.ogg`, `*.aac`
-- **MAPS_PRESET** - для карт: `*.mbtiles`, `*.pmtiles`, `/tiles/*`, `/maps/*`, `*.mvt`
-- **DOCS_PRESET** - для документов: `*.pdf`, `*.epub`, `*.djvu`, `*.mobi`, `*.azw3`
+- **VIDEO_PRESET** – для медиаплееров: `*.mp4`, `*.webm`, `*.mkv`, `*.avi`, `*.mov`, `*.m4v`
+- **AUDIO_PRESET** – для аудиоплееров: `*.mp3`, `*.flac`, `*.wav`, `*.m4a`, `*.ogg`, `*.aac`
+- **MAPS_PRESET** – для карт и тайлов: `*.mbtiles`, `*.pmtiles`, `/tiles/*`, `/maps/*`, `*.mvt`
+- **DOCS_PRESET** – для документов: `*.pdf`, `*.epub`, `*.djvu`, `*.mobi`, `*.azw3`
 
 ```typescript
+import { initServiceWorker } from '@budarin/pluggable-serviceworker';
 import {
+    serveRangeRequests,
     VIDEO_PRESET,
     AUDIO_PRESET,
 } from '@budarin/psw-plugin-serve-range-requests';
 
-initServiceWorker({
-    plugins: [
+initServiceWorker(
+    [
         serveRangeRequests({ ...VIDEO_PRESET, cacheName: 'video-cache' }),
         serveRangeRequests({ ...AUDIO_PRESET, cacheName: 'audio-cache' }),
     ],
-});
+    { version: '1.0.0' }
+);
 ```
 
 ### Адаптивные пресеты
 
-Все вышеуказанные пресеты могут быть адаптированы под характеристики устройства. На устройствах с малым объемом памяти и слабым процессором настройки автоматически снижаются для сохранения нормальной работы приложения.
+Все пресеты можно адаптировать под характеристики устройства. На устройствах с малым объёмом памяти и слабым процессором лимиты автоматически снижаются.
 
 ```typescript
-import { getAdaptivePresets } from '@budarin/psw-plugin-serve-range-requests';
+import { initServiceWorker } from '@budarin/pluggable-serviceworker';
+import {
+    serveRangeRequests,
+    getAdaptivePresets,
+} from '@budarin/psw-plugin-serve-range-requests';
 
-// Автоматически адаптируется под мощность устройства:
-// - Слабые устройства (<4GB RAM или <4 ядра): сниженные лимиты
-// - Мощные устройства (>=4GB RAM и >=4 ядра): полные лимиты
-const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE } = getAdaptivePresets();
+// Автоматически подстраивается под устройство:
+// - Очень слабые (<2GB RAM и <2 ядра): минимальные лимиты
+// - Слабые (<4GB RAM или <4 ядра): сниженные лимиты
+// - Мощные (>=4GB RAM и >=4 ядра): полные настройки пресетов
+const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } = getAdaptivePresets();
 
-initServiceWorker({
-    plugins: [
+initServiceWorker(
+    [
         serveRangeRequests({ ...VIDEO_ADAPTIVE, cacheName: 'video-cache' }),
         serveRangeRequests({ ...AUDIO_ADAPTIVE, cacheName: 'audio-cache' }),
+        serveRangeRequests({ ...MAPS_ADAPTIVE, cacheName: 'maps-cache' }),
+        serveRangeRequests({ ...DOCS_ADAPTIVE, cacheName: 'docs-cache' }),
     ],
-});
+    { version: '1.0.0' }
+);
 ```
 
 ## Поддерживаемые Range форматы

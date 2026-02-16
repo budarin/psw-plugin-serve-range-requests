@@ -13,14 +13,14 @@ importers:
         version: 1.0.22
     devDependencies:
       '@budarin/pluggable-serviceworker':
-        specifier: ^1.10.0
-        version: 1.10.0
+        specifier: ^1.10.3
+        version: 1.10.3
       '@types/serviceworker':
-        specifier: ^0.0.190
-        version: 0.0.190
+        specifier: ^0.0.191
+        version: 0.0.191
       '@types/web':
-        specifier: ^0.0.335
-        version: 0.0.335
+        specifier: ^0.0.336
+        version: 0.0.336
       prettier:
         specifier: ^3.6.2
         version: 3.8.1
@@ -36,8 +36,8 @@ packages:
   '@budarin/http-constants@1.0.22':
     resolution: {integrity: sha512-XZu3JmErHaTTwDPnsGikjwzZ/NHS3DWQNcxmRemhY1jJTr9Va5Arnk4mbE6lVAg1bir1AYyO1zygzQTjiSEtZw==}
 
-  '@budarin/pluggable-serviceworker@1.10.0':
-    resolution: {integrity: sha512-dSt24ao9xsdlpV6k/HcxURF87h3z5WtVwNMlzdgVynbqG3wfJEOgPz3PUNb/GQkvuFehAvweHKgnUwgDek2bhg==}
+  '@budarin/pluggable-serviceworker@1.10.3':
+    resolution: {integrity: sha512-HaYJVLLLPB25TT/pPRAUeNcNDfUDYSPkYGd8SDMut+nKx/CokRwka+CYHVOWrH8XAS+vWZTjoXPfqEmolh/hRA==}
 
   '@esbuild/aix-ppc64@0.27.3':
     resolution: {integrity: sha512-9fJMTNFTWZMh5qwrBItuziu834eOCUcEqymSH7pY+zoMVEZg3gcPuBNxH1EvfVYe9h0x/Ptw8KBzv7qxb7l8dg==}
@@ -348,11 +348,11 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
-  '@types/serviceworker@0.0.190':
-    resolution: {integrity: sha512-bzItk9mz6qntVZ2AI/foSu6OADylZEYqcWZxxYhm7vLD3e0bG4iPJHzltAOL+V8OBb7QbZkEofIC6t1LFEqMsA==}
+  '@types/serviceworker@0.0.191':
+    resolution: {integrity: sha512-DFQspa5cuobxgUuoeGGYBW45oOvPvgYp68Yk24mLdMGGGcgoH0nj5TawBZdRpIqPV8kkZodcQrqradnwGhRVNQ==}
 
-  '@types/web@0.0.335':
-    resolution: {integrity: sha512-MdqOg7t1MaQdaQoGuffSdxOx8icrisFBAuI8/DrdCco4TmRVgcwPJdS9zzbQ6rYocRQNW9yekQtnurTDWksOBg==}
+  '@types/web@0.0.336':
+    resolution: {integrity: sha512-BF63oBTS3D5d1XEKR2fou32PlxSqiaYZxTCchI/eeS/q6f51mKQdcVvFJcLUPsiO8G6KyEPlSYVvhQfa1KVeSw==}
 
   '@vitest/expect@4.0.18':
     resolution: {integrity: sha512-8sCWUyckXXYvx4opfzVY03EOiYVxyNrHS5QxX3DAIi5dpJAAkyJezHCP77VMX4HKA2LDT/Jpfo8i2r5BE3GnQQ==}
@@ -571,7 +571,7 @@ snapshots:
 
   '@budarin/http-constants@1.0.22': {}
 
-  '@budarin/pluggable-serviceworker@1.10.0':
+  '@budarin/pluggable-serviceworker@1.10.3':
     dependencies:
       '@budarin/http-constants': 1.0.22
 
@@ -741,9 +741,9 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
-  '@types/serviceworker@0.0.190': {}
+  '@types/serviceworker@0.0.191': {}
 
-  '@types/web@0.0.335': {}
+  '@types/web@0.0.336': {}
 
   '@vitest/expect@4.0.18':
     dependencies:
