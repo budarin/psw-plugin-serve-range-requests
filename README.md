@@ -10,6 +10,10 @@ Service Worker plugin for `@budarin/pluggable-serviceworker` that serves HTTP Ra
 [![bundle](https://img.shields.io/bundlephobia/minzip/@budarin/psw-plugin-serve-range-requests)](https://bundlephobia.com/result?p=@budarin/psw-plugin-serve-range-requests)
 [![GitHub](https://img.shields.io/github/license/budarin/psw-plugin-serve-range-requests)](https://github.com/budarin/psw-plugin-serve-range-requests)
 
+### Why this plugin
+
+Applications that play or display large media—video, audio, PDFs—typically request data in small chunks (HTTP Range requests) rather than loading entire files. If such files are stored in a normal cache, every request for a single chunk would cause the **entire file** to be read from cache and sent to the client. That leads to unnecessary memory and CPU usage and can make the application sluggish or unresponsive. This plugin serves cached content by range: only the requested bytes are read and delivered, so playback stays smooth and resource usage stays under control.
+
 ## Quick start
 
 ```typescript

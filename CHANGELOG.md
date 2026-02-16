@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-02-16
+
+### Added
+
+- **Documentation**: Introductory section in README and README.ru explaining why range requests matter when caching large media—whole-file retrieval per chunk wastes memory and CPU; the plugin serves only the requested byte range for smooth playback and controlled resource usage.
+
 ## [1.0.8] - 2026-02-16
 
 ### Fixed
