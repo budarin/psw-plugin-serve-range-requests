@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] - 2026-02-16
+
+### Changed
+
+- **Documentation**: Expanded README and README.ru guidance for using the plugin with large cached resources, explaining cache quota issues, recommended precache strategies, and behavior when a file is missing from the cache.
+
 ## [1.0.9] - 2026-02-16
 
 ### Added

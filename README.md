@@ -2,7 +2,7 @@
 
 [Русская версия](https://github.com/budarin/psw-plugin-serve-range-requests/blob/master/README.ru.md)
 
-Service Worker plugin for `@budarin/pluggable-serviceworker` that serves HTTP Range requests for cached files.
+Service Worker plugin for [@budarin/pluggable-serviceworker](https://www.npmjs.com/package/@budarin/pluggable-serviceworker) that serves HTTP Range requests for cached files.
 
 [![CI](https://github.com/budarin/psw-plugin-serve-range-requests/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/budarin/psw-plugin-serve-range-requests/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@budarin/psw-plugin-serve-range-requests?color=cb0000)](https://www.npmjs.com/package/@budarin/psw-plugin-serve-range-requests)
@@ -34,25 +34,25 @@ serveRangeRequests({
 
 ## Options
 
-| Option                  | Type       | Default | Description                           |
-| ----------------------- | ---------- | ------- | ------------------------------------- |
-| `cacheName`             | `string`   | -       | **Required.** Cache name              |
-| `order`                 | `number`   | `-10`   | Plugin execution order (optional)     |
-| `maxCachedRanges`       | `number`   | `100`   | Max number of cached ranges (see below) |
-| `maxCachedMetadata`     | `number`   | `200`   | Max number of files to keep metadata for (see below) |
-| `maxCacheableRangeSize` | `number`   | `10MB`  | Max size of a single cached range (see below) |
-| `include`               | `string[]` | -       | File glob patterns to include         |
-| `exclude`               | `string[]` | -       | File glob patterns to exclude         |
-| `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
-| `enableLogging`         | `boolean`  | `false` | Verbose logging                       |
+| Option                      | Type       | Default                       | Description                                                                                        |
+| --------------------------- | ---------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| `cacheName`                 | `string`   | -                             | **Required.** Cache name                                                                           |
+| `order`                     | `number`   | `-10`                         | Plugin execution order (optional)                                                                  |
+| `maxCachedRanges`           | `number`   | `100`                         | Max number of cached ranges (see below)                                                            |
+| `maxCachedMetadata`         | `number`   | `200`                         | Max number of files to keep metadata for (see below)                                               |
+| `maxCacheableRangeSize`     | `number`   | `10MB`                        | Max size of a single cached range (see below)                                                      |
+| `include`                   | `string[]` | -                             | File glob patterns to include                                                                      |
+| `exclude`                   | `string[]` | -                             | File glob patterns to exclude                                                                      |
+| `rangeResponseCacheControl` | `string`   | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
+| `enableLogging`             | `boolean`  | `false`                       | Verbose logging                                                                                    |
 
-**Metadata cache (`maxCachedMetadata`)**  
+**Metadata cache (`maxCachedMetadata`)**
 The plugin keeps metadata for files it has already served so that repeat Range requests to the same file are faster. Set this to roughly how many **different** files of this type users typically open or play in a session. If they often switch between many items (e.g. a long playlist, a large document list), use a higher value (hundreds). If they usually work with just a few files at a time, a lower value (tens) is enough. File size does not affect this limit—only the number of distinct URLs matters.
 
-**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**  
+**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**
 The plugin caches every range response it serves, so that repeated requests for the same part of a file (e.g. rewind, replay) are served from memory. Eviction is LRU: when the limit is reached, the least recently used (oldest) entries are dropped. **maxCachedRanges** is how many range responses to keep—more if users often jump back to the same parts. **maxCacheableRangeSize** is only an upper cap: ranges larger than this are not cached (to avoid one huge entry using too much memory). There is no minimum size—any requested range that fits under the cap is cached.
 
-**206 responses and browser cache**  
+**206 responses and browser cache**
 By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).
 
 When choosing option values, focus on the real traffic profile of your resources. You can inspect and analyze all requests to your assets in the browser DevTools `Network` panel.
@@ -129,7 +129,8 @@ import {
 // - Very low-end (<2GB RAM and <2 CPU cores): minimal limits
 // - Low-end (<4GB RAM or <4 CPU cores): reduced limits
 // - More powerful (>=4GB RAM and >=4 CPU cores): full preset settings
-const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } = getAdaptivePresets();
+const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
+    getAdaptivePresets();
 
 initServiceWorker(
     [
