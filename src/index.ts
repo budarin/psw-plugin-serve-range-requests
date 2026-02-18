@@ -15,6 +15,7 @@ import {
 import { HTTP_STATUS_PARTIAL_CONTENT } from '@budarin/http-constants/statuses';
 import { MIME_APPLICATION_OCTET_STREAM } from '@budarin/http-constants/mime-types';
 
+import type { RangeCacheKey, UrlString } from './types.js';
 import { addCacheHeaders } from './addCacheHeaders.js';
 import {
     type Range,
@@ -114,11 +115,20 @@ export function serveRangeRequests(
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
-    const rangeCache = new Map<string, CachedRange>();
+    const rangeCache = new Map<RangeCacheKey, CachedRange>();
     // Кеш метаданных файлов
-    const fileMetadataCache = new Map<string, FileMetadata>();
+    const fileMetadataCache = new Map<UrlString, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
+    // Дедупликация одновременных запросов по cacheKey (один раз читаем диапазон)
+    const inFlight = new Map<
+        RangeCacheKey,
+        Promise<{
+            data: ArrayBuffer;
+            headers: Headers;
+            range: Range;
+        } | null>
+    >();
 
     /**
      * Читает указанный диапазон байтов из потока
@@ -172,71 +182,50 @@ export function serveRangeRequests(
     }
 
     /**
-     * Получает кеш инстанс (с кешированием)
+     * Получает кеш инстанс (с кешированием). При ошибке сбрасывает cacheInstance.
      */
     async function getCache(): Promise<Cache> {
-        if (!cacheInstance) {
-            cacheInstance = await caches.open(cacheName);
+        try {
+            if (!cacheInstance) {
+                cacheInstance = await caches.open(cacheName);
+            }
+            return cacheInstance;
+        } catch (error) {
+            cacheInstance = null;
+            throw error;
         }
-        return cacheInstance;
     }
 
     /**
-     * Получает метаданные файла из кеша (размер, тип, ETag, Last-Modified при наличии)
+     * Извлекает метаданные файла из Response (размер, тип, ETag, Last-Modified).
      */
-    async function getFileMetadata(
-        url: string
-    ): Promise<FileMetadata | undefined> {
-        if (fileMetadataCache.has(url)) {
-            return fileMetadataCache.get(url);
-        }
-
-        try {
-            const cache = await getCache();
-            const response = await cache.match(url);
-            if (!response) {
-                return;
-            }
-
-            const contentLengthHeader = response.headers.get(
-                HEADER_CONTENT_LENGTH
-            );
-            if (!contentLengthHeader) {
-                return; // Нет информации о размере файла
-            }
-
-            const size = parseInt(contentLengthHeader, 10);
-            if (isNaN(size) || size <= 0) {
-                return; // Некорректный размер файла
-            }
-
-            const etag = response.headers.get(HEADER_ETAG) ?? undefined;
-            const lastModified =
-                response.headers.get(HEADER_LAST_MODIFIED) ?? undefined;
-
-            const metadata: FileMetadata = {
-                size,
-                type:
-                    response.headers.get(HEADER_CONTENT_TYPE) ??
-                    MIME_APPLICATION_OCTET_STREAM,
-                ...(etag && { etag }),
-                ...(lastModified && { lastModified }),
-            };
-
-            manageMetadataCacheSize();
-            fileMetadataCache.set(url, metadata);
-
-            if (enableLogging) {
-                console.log(
-                    `serveRangeRequests plugin: cached metadata for ${url}, size: ${size}`
-                );
-            }
-
-            return metadata;
-        } catch (error) {
-            console.error('Error getting file metadata:', error);
+    function extractMetadataFromResponse(
+        response: Response
+    ): FileMetadata | undefined {
+        const contentLengthHeader = response.headers.get(
+            HEADER_CONTENT_LENGTH
+        );
+        if (!contentLengthHeader) {
             return;
         }
+
+        const size = parseInt(contentLengthHeader, 10);
+        if (isNaN(size) || size <= 0) {
+            return;
+        }
+
+        const etag = response.headers.get(HEADER_ETAG) ?? undefined;
+        const lastModified =
+            response.headers.get(HEADER_LAST_MODIFIED) ?? undefined;
+
+        return {
+            size,
+            type:
+                response.headers.get(HEADER_CONTENT_TYPE) ??
+                MIME_APPLICATION_OCTET_STREAM,
+            ...(etag && { etag }),
+            ...(lastModified && { lastModified }),
+        };
     }
 
     /**
@@ -275,7 +264,7 @@ export function serveRangeRequests(
     /**
      * Получает запись из кеша и обновляет её позицию (LRU)
      */
-    function getCachedRange(cacheKey: string): CachedRange | undefined {
+    function getCachedRange(cacheKey: RangeCacheKey): CachedRange | undefined {
         const cached = rangeCache.get(cacheKey);
         if (cached) {
             // Перемещаем в конец для LRU
@@ -313,8 +302,8 @@ export function serveRangeRequests(
                 return;
             }
 
-            const url = request.url;
-            const cacheKey = `${url}|${rangeHeader}`;
+            const url: UrlString = request.url;
+            const cacheKey: RangeCacheKey = `${url}|${rangeHeader}`;
 
             // Проверяем кеш range-ответов (с LRU обновлением)
             const cachedRange = getCachedRange(cacheKey);
@@ -327,92 +316,147 @@ export function serveRangeRequests(
                 return addCacheHeaders(response, rangeResponseCacheControl);
             }
 
-            // Получаем метаданные файла
-            const metadata = await getFileMetadata(url);
-            if (!metadata) {
-                if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: skipping ${url} (file not in cache or no metadata)`
-                    );
-                }
+            // Один cache.match на запрос: дедупликация по cacheKey (одновременные запросы ждут один результат)
+            let workPromise = inFlight.get(cacheKey);
+            if (!workPromise) {
+                workPromise = (async (): Promise<{
+                    data: ArrayBuffer;
+                    headers: Headers;
+                    range: Range;
+                } | null> => {
+                    try {
+                        const cache = await getCache();
+                        let cachedResponse: Response | undefined;
+                        try {
+                            cachedResponse = await cache.match(url);
+                        } catch (matchError) {
+                            cacheInstance = null;
+                            if (enableLogging) {
+                                console.error(
+                                    'serveRangeRequests plugin: cache.match failed',
+                                    matchError
+                                );
+                            }
+                            return null;
+                        }
+
+                        if (!cachedResponse) {
+                            if (enableLogging) {
+                                console.log(
+                                    `serveRangeRequests plugin: skipping ${url} (file not in cache)`
+                                );
+                            }
+                            return null;
+                        }
+
+                        const metadata = extractMetadataFromResponse(
+                            cachedResponse
+                        );
+                        if (!metadata) {
+                            if (enableLogging) {
+                                console.log(
+                                    `serveRangeRequests plugin: skipping ${url} (no valid metadata)`
+                                );
+                            }
+                            return null;
+                        }
+
+                        manageMetadataCacheSize();
+                        fileMetadataCache.set(url, metadata);
+                        if (enableLogging) {
+                            console.log(
+                                `serveRangeRequests plugin: cached metadata for ${url}, size: ${metadata.size}`
+                            );
+                        }
+
+                        const ifRangeHeader =
+                            request.headers.get('If-Range');
+                        if (
+                            ifRangeHeader &&
+                            !ifRangeMatches(ifRangeHeader, metadata)
+                        ) {
+                            if (enableLogging) {
+                                console.log(
+                                    `serveRangeRequests plugin: skipping ${url} (If-Range does not match)`
+                                );
+                            }
+                            return null;
+                        }
+
+                        const range = parseRangeHeader(
+                            rangeHeader,
+                            metadata.size
+                        );
+
+                        if (!cachedResponse.body) {
+                            if (enableLogging) {
+                                console.log(
+                                    `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
+                                );
+                            }
+                            return null;
+                        }
+
+                        const data = await readRangeFromStream(
+                            cachedResponse.body,
+                            range
+                        );
+
+                        const headers = new Headers({
+                            [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
+                            [HEADER_CONTENT_LENGTH]: String(
+                                data.byteLength
+                            ),
+                            [HEADER_CONTENT_TYPE]: metadata.type,
+                        });
+
+                        return { data, headers, range };
+                    } catch (error) {
+                        cacheInstance = null;
+                        if (enableLogging) {
+                            console.error(
+                                `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
+                                error
+                            );
+                        }
+                        return null;
+                    }
+                })();
+                inFlight.set(cacheKey, workPromise);
+                workPromise.finally(() => inFlight.delete(cacheKey));
+            }
+
+            const result = await workPromise;
+            if (!result) {
                 return;
             }
 
-            // If-Range: отдаём из кеша только если валидатор совпадает с сохранённым
-            const ifRangeHeader = request.headers.get('If-Range');
-            if (ifRangeHeader && !ifRangeMatches(ifRangeHeader, metadata)) {
+            const { data, headers, range } = result;
+
+            // Кешируем range-ответ только если он подходящего размера
+            if (shouldCacheRange(range, maxCacheableRangeSize)) {
+                manageCacheSize();
+                rangeCache.set(cacheKey, { data, headers });
+
                 if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: skipping ${url} (If-Range does not match cached validator)`
-                    );
-                }
-                return;
-            }
-
-            try {
-                // Парсим Range заголовок
-                const range = parseRangeHeader(rangeHeader, metadata.size);
-
-                // Получаем файл из кеша
-                const cache = await getCache();
-                const cachedResponse = await cache.match(url);
-                if (!cachedResponse?.body) {
-                    if (enableLogging) {
-                        console.log(
-                            `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
-                        );
-                    }
-                    return;
-                }
-
-                // Читаем нужный диапазон
-                const data = await readRangeFromStream(
-                    cachedResponse.body,
-                    range
-                );
-
-                // Создаем заголовки ответа
-                const headers = new Headers({
-                    [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
-                    [HEADER_CONTENT_LENGTH]: String(data.byteLength),
-                    [HEADER_CONTENT_TYPE]: metadata.type,
-                });
-
-                // Кешируем range-ответ только если он подходящего размера
-                if (shouldCacheRange(range, maxCacheableRangeSize)) {
-                    manageCacheSize();
-                    rangeCache.set(cacheKey, { data, headers });
-
-                    if (enableLogging) {
-                        const rangeSize = range.end - range.start + 1;
-                        console.log(
-                            `serveRangeRequests plugin: cached range for ${url}, size: ${rangeSize} bytes`
-                        );
-                    }
-                } else if (enableLogging) {
                     const rangeSize = range.end - range.start + 1;
                     console.log(
-                        `serveRangeRequests plugin: skipped caching for ${url}, size: ${rangeSize} bytes (exceeds maxCacheableRangeSize)`
+                        `serveRangeRequests plugin: cached range for ${url}, size: ${rangeSize} bytes`
                     );
                 }
-
-                // Создаем и возвращаем ответ
-                const response = new Response(data, {
-                    status: HTTP_STATUS_PARTIAL_CONTENT,
-                    headers,
-                });
-
-                return addCacheHeaders(response, rangeResponseCacheControl);
-            } catch (error) {
-                // Логируем ошибку и возвращаем undefined, чтобы передать управление следующему плагину
-                if (enableLogging) {
-                    console.error(
-                        `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
-                        error
-                    );
-                }
-                return;
+            } else if (enableLogging) {
+                const rangeSize = range.end - range.start + 1;
+                console.log(
+                    `serveRangeRequests plugin: skipped caching for ${url}, size: ${rangeSize} bytes (exceeds maxCacheableRangeSize)`
+                );
             }
+
+            const response = new Response(data, {
+                status: HTTP_STATUS_PARTIAL_CONTENT,
+                headers,
+            });
+
+            return addCacheHeaders(response, rangeResponseCacheControl);
         },
     };
 }

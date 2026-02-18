@@ -1,7 +1,25 @@
+import type { GlobPattern, RangeHeaderValue, UrlString } from './types.js';
+
 /**
  * Чистые функции для парсинга Range, проверки If-Range, glob и кеширования.
  * Вынесены для unit-тестов.
  */
+
+/** Кеш скомпилированных RegExp по glob-паттерну (избегаем повторной компиляции). */
+const globRegexCache = new Map<GlobPattern, RegExp>();
+
+function getRegexForPattern(pattern: GlobPattern): RegExp {
+    let regex = globRegexCache.get(pattern);
+    if (!regex) {
+        const regexPattern = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.');
+        regex = new RegExp(`^${regexPattern}$`);
+        globRegexCache.set(pattern, regex);
+    }
+    return regex;
+}
 
 export interface Range {
     start: number;
@@ -17,7 +35,7 @@ export interface IfRangeMetadata {
  * Парсит заголовок Range и возвращает диапазон байтов.
  */
 export function parseRangeHeader(
-    rangeHeader: string,
+    rangeHeader: RangeHeaderValue,
     fullSize: number
 ): Range {
     const trimmedHeader = rangeHeader.trim();
@@ -96,23 +114,18 @@ export function shouldCacheRange(
 /**
  * Проверяет, соответствует ли URL указанному glob-паттерну (по pathname).
  */
-export function matchesGlob(url: string, pattern: string): boolean {
+export function matchesGlob(url: UrlString, pattern: GlobPattern): boolean {
     const pathname = new URL(url, 'https://example.com').pathname;
-    const regexPattern = pattern
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.');
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(pathname);
+    return getRegexForPattern(pattern).test(pathname);
 }
 
 /**
  * Проверяет, должен ли файл обрабатываться на основе include/exclude масок.
  */
 export function shouldProcessFile(
-    url: string,
-    include?: string[],
-    exclude?: string[]
+    url: UrlString,
+    include?: GlobPattern[],
+    exclude?: GlobPattern[]
 ): boolean {
     if (exclude && exclude.length > 0) {
         for (const pattern of exclude) {

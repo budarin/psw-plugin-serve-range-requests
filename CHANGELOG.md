@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.11] - 2026-02-19
+
+### Changed
+
+- **Performance**: Single Cache API lookup per request (metadata and body from one response); concurrent requests for the same URL and range are deduplicated; glob patterns for `include`/`exclude` compiled once per pattern and reused.
+- **Resilience**: On cache access failure the plugin clears its cache handle and re-opens the cache on the next request.
+- **Code**: Semantic type aliases (`UrlString`, `RangeHeaderValue`, `GlobPattern`, `RangeCacheKey`) used in signatures and caches.
+
 ## [1.0.10] - 2026-02-16
 
 ### Changed
