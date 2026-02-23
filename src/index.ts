@@ -120,22 +120,15 @@ export function serveRangeRequests(
     const fileMetadataCache = new Map<UrlString, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
-    // Дедупликация одновременных запросов по cacheKey (один раз читаем диапазон)
-    const inFlight = new Map<
-        RangeCacheKey,
-        Promise<{
-            data: ArrayBuffer;
-            headers: Headers;
-            range: Range;
-        } | null>
-    >();
 
     /**
-     * Читает указанный диапазон байтов из потока
+     * Читает указанный диапазон байтов из потока.
+     * Учитывает AbortSignal — при отмене запроса прекращает чтение.
      */
     async function readRangeFromStream(
         stream: ReadableStream<Uint8Array>,
-        range: Range
+        range: Range,
+        signal?: AbortSignal
     ): Promise<ArrayBuffer> {
         let offset = 0;
         let position = 0;
@@ -146,6 +139,15 @@ export function serveRangeRequests(
         try {
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             while (true) {
+                if (signal?.aborted) {
+                    try {
+                        await reader.cancel();
+                    } catch {
+                        // ignore cancel errors
+                    }
+                    throw new Error('Request aborted');
+                }
+
                 const { done, value } = await reader.read();
                 if (done) {
                     break;
@@ -284,7 +286,18 @@ export function serveRangeRequests(
 
         async fetch(event: FetchEvent): FetchResponse {
             const request = event.request;
+            const signal = request.signal;
             const rangeHeader = request.headers.get(HEADER_RANGE);
+
+            // Если запрос уже отменён — не делаем ничего
+            if (signal.aborted) {
+                if (enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: abort handling for ${request.url} (signal already aborted)`
+                    );
+                }
+                return;
+            }
 
             // Если нет заголовка Range, пропускаем
             if (!rangeHeader) {
@@ -321,115 +334,113 @@ export function serveRangeRequests(
                 return addCacheHeaders(response, rangeResponseCacheControl);
             }
 
-            // Один cache.match на запрос: дедупликация по cacheKey (одновременные запросы ждут один результат)
-            let workPromise = inFlight.get(cacheKey);
-            if (!workPromise) {
-                workPromise = (async (): Promise<{
-                    data: ArrayBuffer;
-                    headers: Headers;
-                    range: Range;
-                } | null> => {
+            const workPromise = (async (): Promise<{
+                data: ArrayBuffer;
+                headers: Headers;
+                range: Range;
+            } | null> => {
+                try {
+                    const cache = await getCache();
+                    let cachedResponse: Response | undefined;
                     try {
-                        const cache = await getCache();
-                        let cachedResponse: Response | undefined;
-                        try {
-                            cachedResponse = await cache.match(url);
-                        } catch (matchError) {
-                            cacheInstance = null;
-                            if (enableLogging) {
-                                console.error(
-                                    'serveRangeRequests plugin: cache.match failed',
-                                    matchError
-                                );
-                            }
-                            return null;
-                        }
-
-                        if (!cachedResponse) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (file not in cache)`
-                                );
-                            }
-                            return null;
-                        }
-
-                        const metadata =
-                            extractMetadataFromResponse(cachedResponse);
-                        if (!metadata) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (no valid metadata)`
-                                );
-                            }
-                            return null;
-                        }
-
-                        if (maxCachedMetadata > 0) {
-                            manageMetadataCacheSize();
-                            fileMetadataCache.set(url, metadata);
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: cached metadata for ${url}, size: ${metadata.size}`
-                                );
-                            }
-                        }
-
-                        const ifRangeHeader = request.headers.get('If-Range');
-                        if (
-                            ifRangeHeader &&
-                            !ifRangeMatches(ifRangeHeader, metadata)
-                        ) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (If-Range does not match)`
-                                );
-                            }
-                            return null;
-                        }
-
-                        const range = parseRangeHeader(
-                            rangeHeader,
-                            metadata.size
-                        );
-
-                        if (!cachedResponse.body) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
-                                );
-                            }
-                            return null;
-                        }
-
-                        const data = await readRangeFromStream(
-                            cachedResponse.body,
-                            range
-                        );
-
-                        const headers = new Headers({
-                            [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
-                            [HEADER_CONTENT_LENGTH]: String(data.byteLength),
-                            [HEADER_CONTENT_TYPE]: metadata.type,
-                        });
-
-                        return { data, headers, range };
-                    } catch (error) {
+                        cachedResponse = await cache.match(url);
+                    } catch (matchError) {
                         cacheInstance = null;
                         if (enableLogging) {
                             console.error(
-                                `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
-                                error
+                                'serveRangeRequests plugin: cache.match failed',
+                                matchError
                             );
                         }
                         return null;
                     }
-                })();
-                inFlight.set(cacheKey, workPromise);
-                workPromise.finally(() => inFlight.delete(cacheKey));
-            }
 
-            const result = await workPromise;
+                    if (!cachedResponse) {
+                        if (enableLogging) {
+                            console.log(
+                                `serveRangeRequests plugin: skipping ${url} (file not in cache)`
+                            );
+                        }
+                        return null;
+                    }
+
+                    const metadata =
+                        extractMetadataFromResponse(cachedResponse);
+                    if (!metadata) {
+                        if (enableLogging) {
+                            console.log(
+                                `serveRangeRequests plugin: skipping ${url} (no valid metadata)`
+                            );
+                        }
+                        return null;
+                    }
+
+                    if (maxCachedMetadata > 0) {
+                        manageMetadataCacheSize();
+                        fileMetadataCache.set(url, metadata);
+                        if (enableLogging) {
+                            console.log(
+                                `serveRangeRequests plugin: cached metadata for ${url}, size: ${metadata.size}`
+                            );
+                        }
+                    }
+
+                    const ifRangeHeader = request.headers.get('If-Range');
+                    if (
+                        ifRangeHeader &&
+                        !ifRangeMatches(ifRangeHeader, metadata)
+                    ) {
+                        if (enableLogging) {
+                            console.log(
+                                `serveRangeRequests plugin: skipping ${url} (If-Range does not match)`
+                            );
+                        }
+                        return null;
+                    }
+
+                    const range = parseRangeHeader(rangeHeader, metadata.size);
+
+                    if (!cachedResponse.body) {
+                        if (enableLogging) {
+                            console.log(
+                                `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
+                            );
+                        }
+                        return null;
+                    }
+
+                    const data = await readRangeFromStream(
+                        cachedResponse.body,
+                        range,
+                        signal
+                    );
+
+                    const headers = new Headers({
+                        [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
+                        [HEADER_CONTENT_LENGTH]: String(data.byteLength),
+                        [HEADER_CONTENT_TYPE]: metadata.type,
+                    });
+
+                    return { data, headers, range };
+                } catch (error) {
+                    cacheInstance = null;
+                    if (enableLogging) {
+                        console.error(
+                            `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
+                            error
+                        );
+                    }
+                    return null;
+                }
+            })();
+
+            const abortPromise = new Promise<null>((resolve) => {
+                signal.addEventListener('abort', () => resolve(null), {
+                    once: true,
+                });
+            });
+
+            const result = await Promise.race([workPromise, abortPromise]);
             if (!result) {
                 return;
             }
