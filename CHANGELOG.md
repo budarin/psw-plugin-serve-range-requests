@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.12] - 2026-02-23
+
+### Fixed
+
+- **Caching**: `maxCachedRanges: 0` and `maxCachedMetadata: 0` now fully disable the in-memory caches instead of keeping a single entry that is constantly overwritten.
+
+### Added
+
+- **Tests**: New tests covering cache behavior when limits are set to zero, ensuring no entries are stored and all requests go through the underlying Cache API.
+
 ## [1.0.11] - 2026-02-19
 
 ### Changed

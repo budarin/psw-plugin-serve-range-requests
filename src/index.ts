@@ -202,9 +202,7 @@ export function serveRangeRequests(
     function extractMetadataFromResponse(
         response: Response
     ): FileMetadata | undefined {
-        const contentLengthHeader = response.headers.get(
-            HEADER_CONTENT_LENGTH
-        );
+        const contentLengthHeader = response.headers.get(HEADER_CONTENT_LENGTH);
         if (!contentLengthHeader) {
             return;
         }
@@ -232,6 +230,9 @@ export function serveRangeRequests(
      * Управляет размером кеша range-ответов (LRU стратегия)
      */
     function manageCacheSize(): void {
+        if (maxCachedRanges <= 0) {
+            return;
+        }
         if (rangeCache.size >= maxCachedRanges) {
             // Удаляем самую старую запись (первую в Map - это LRU поведение)
             const firstKey = rangeCache.keys().next().value;
@@ -248,6 +249,9 @@ export function serveRangeRequests(
      * Управляет размером кеша метаданных (LRU стратегия)
      */
     function manageMetadataCacheSize(): void {
+        if (maxCachedMetadata <= 0) {
+            return;
+        }
         if (fileMetadataCache.size >= maxCachedMetadata) {
             const firstKey = fileMetadataCache.keys().next().value;
             if (firstKey) {
@@ -306,7 +310,8 @@ export function serveRangeRequests(
             const cacheKey: RangeCacheKey = `${url}|${rangeHeader}`;
 
             // Проверяем кеш range-ответов (с LRU обновлением)
-            const cachedRange = getCachedRange(cacheKey);
+            const cachedRange =
+                maxCachedRanges > 0 ? getCachedRange(cacheKey) : undefined;
             if (cachedRange) {
                 const { data, headers } = cachedRange;
                 const response = new Response(data, {
@@ -349,9 +354,8 @@ export function serveRangeRequests(
                             return null;
                         }
 
-                        const metadata = extractMetadataFromResponse(
-                            cachedResponse
-                        );
+                        const metadata =
+                            extractMetadataFromResponse(cachedResponse);
                         if (!metadata) {
                             if (enableLogging) {
                                 console.log(
@@ -361,16 +365,17 @@ export function serveRangeRequests(
                             return null;
                         }
 
-                        manageMetadataCacheSize();
-                        fileMetadataCache.set(url, metadata);
-                        if (enableLogging) {
-                            console.log(
-                                `serveRangeRequests plugin: cached metadata for ${url}, size: ${metadata.size}`
-                            );
+                        if (maxCachedMetadata > 0) {
+                            manageMetadataCacheSize();
+                            fileMetadataCache.set(url, metadata);
+                            if (enableLogging) {
+                                console.log(
+                                    `serveRangeRequests plugin: cached metadata for ${url}, size: ${metadata.size}`
+                                );
+                            }
                         }
 
-                        const ifRangeHeader =
-                            request.headers.get('If-Range');
+                        const ifRangeHeader = request.headers.get('If-Range');
                         if (
                             ifRangeHeader &&
                             !ifRangeMatches(ifRangeHeader, metadata)
@@ -404,9 +409,7 @@ export function serveRangeRequests(
 
                         const headers = new Headers({
                             [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
-                            [HEADER_CONTENT_LENGTH]: String(
-                                data.byteLength
-                            ),
+                            [HEADER_CONTENT_LENGTH]: String(data.byteLength),
                             [HEADER_CONTENT_TYPE]: metadata.type,
                         });
 
@@ -433,8 +436,11 @@ export function serveRangeRequests(
 
             const { data, headers, range } = result;
 
-            // Кешируем range-ответ только если он подходящего размера
-            if (shouldCacheRange(range, maxCacheableRangeSize)) {
+            // Кешируем range-ответ только если он подходящего размера и кеш включен
+            if (
+                maxCachedRanges > 0 &&
+                shouldCacheRange(range, maxCacheableRangeSize)
+            ) {
                 manageCacheSize();
                 rangeCache.set(cacheKey, { data, headers });
 
