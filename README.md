@@ -39,7 +39,6 @@ serveRangeRequests({
 | `cacheName`                   | `string`   | -                             | **Required.** Cache name                                                                           |
 | `order`                       | `number`   | `-10`                         | Plugin execution order (optional)                                                                  |
 | `maxCachedRanges`             | `number`   | `100`                         | Max number of cached ranges (see below)                                                            |
-| `maxCachedMetadata`           | `number`   | `200`                         | Max number of files to keep metadata for (see below)                                               |
 | `maxCacheableRangeSize`       | `number`   | `10MB`                        | Max size of a single cached range (see below)                                                      |
 | `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | How many ranges of one file to read in parallel (see below)                                        |
 | `prioritizeLatestRequest`     | `boolean`  | `true`                        | Queue mode: video/scrubbing vs maps/docs (see below)                                               |
@@ -68,11 +67,8 @@ Users flip back and forth — the same pages are requested again. Range cache he
 
 ---
 
-**Metadata cache (`maxCachedMetadata`)**  
-The plugin remembers size and type of files it has already served so it doesn’t hit Cache API unnecessarily. Set this to roughly how many **different** files users open or play in a session: a playlist of 50 tracks — tens; a catalog of hundreds of docs — hundreds. File size doesn’t affect this limit.
-
 **Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**  
-The plugin can cache ready range responses. **maxCachedRanges** — how many to keep in memory. **maxCacheableRangeSize** — upper cap; larger ranges are not cached (to avoid memory spikes). Eviction is LRU. For video and audio scrubbing, the cache is not used — don’t waste memory on it.
+The plugin caches ready range responses and file metadata (size, type) for the same URLs. **maxCachedRanges** limits both — how many range responses and how many metadata entries to keep. **maxCacheableRangeSize** — upper cap per range; larger ranges are not cached (to avoid memory spikes). Eviction is LRU. For video and audio scrubbing, set **maxCachedRanges** to 0 — the cache is not used.
 
 **Concurrency (`maxConcurrentRangesPerUrl`)**  
 Only applies when `prioritizeLatestRequest: true`. For video and audio, 1 is optimal — queues slow things down. When `false`, no limit — all requests run in parallel.
@@ -102,7 +98,6 @@ initServiceWorker(
             include: ['*.mp4', '*.webm', '*.mkv'], // Video
             maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
             maxCachedRanges: 0,
-            maxCachedMetadata: 0,
             maxConcurrentRangesPerUrl: 1,
             prioritizeLatestRequest: true,
         }),
@@ -111,7 +106,6 @@ initServiceWorker(
             include: ['*.mp3', '*.flac', '*.wav'], // Audio
             maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
             maxCachedRanges: 0,
-            maxCachedMetadata: 0,
             maxConcurrentRangesPerUrl: 1,
             prioritizeLatestRequest: true,
         }),

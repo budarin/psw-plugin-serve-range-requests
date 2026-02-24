@@ -22,7 +22,6 @@ export const VIDEO_PRESET = {
     include: ['*.mp4', '*.webm', '*.mkv', '*.avi', '*.mov', '*.m4v'],
     maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB — верхняя граница одной записи
     maxCachedRanges: 0,
-    maxCachedMetadata: 0,
     maxConcurrentRangesPerUrl: 1,
     prioritizeLatestRequest: true,
 } as const;
@@ -35,7 +34,6 @@ export const AUDIO_PRESET = {
     include: ['*.mp3', '*.flac', '*.wav', '*.m4a', '*.ogg', '*.aac'],
     maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
     maxCachedRanges: 0,
-    maxCachedMetadata: 0,
     maxConcurrentRangesPerUrl: 1,
     prioritizeLatestRequest: true,
 } as const;
@@ -48,7 +46,6 @@ export const MAPS_PRESET = {
     include: ['*.mbtiles', '*.pmtiles', '/tiles/*', '/maps/*', '*.mvt'],
     maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
     maxCachedRanges: 1000,
-    maxCachedMetadata: 200,
     prioritizeLatestRequest: false,
 } as const;
 
@@ -60,7 +57,6 @@ export const DOCS_PRESET = {
     include: ['*.pdf', '*.epub', '*.djvu', '*.mobi', '*.azw3'],
     maxCacheableRangeSize: 5 * 1024 * 1024, // 5MB
     maxCachedRanges: 150,
-    maxCachedMetadata: 50,
     prioritizeLatestRequest: false,
 } as const;
 
@@ -102,7 +98,6 @@ export function getAdaptivePresets() {
             DOCS_ADAPTIVE: {
                 ...DOCS_PRESET,
                 maxCachedRanges: 25, // Очень мало
-                maxCachedMetadata: 10,
             },
         };
     } else if (isLowEndDevice) {
@@ -122,7 +117,6 @@ export function getAdaptivePresets() {
             DOCS_ADAPTIVE: {
                 ...DOCS_PRESET,
                 maxCachedRanges: 100, // Умеренно меньше
-                maxCachedMetadata: 35,
             },
         };
     }

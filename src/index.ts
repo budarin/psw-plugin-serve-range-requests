@@ -61,12 +61,6 @@ export interface RangePluginOptions {
      */
     maxCachedRanges?: number;
     /**
-     * Максимальное количество закешированных метаданных файлов (по умолчанию 200)
-     * Метаданные: размер файла (Content-Length) и тип (Content-Type) из HTTP заголовков.
-     * Кешируются для ускорения - избегаем повторных обращений к Cache API.
-     */
-    maxCachedMetadata?: number;
-    /**
      * Включить подробное логирование (по умолчанию false)
      */
     enableLogging?: boolean;
@@ -119,7 +113,6 @@ export function serveRangeRequests(
         cacheName,
         order = -10,
         maxCachedRanges = 100,
-        maxCachedMetadata = 200,
         enableLogging = false,
         maxCacheableRangeSize = 10 * 1024 * 1024, // 10MB
         include,
@@ -364,13 +357,13 @@ export function serveRangeRequests(
     }
 
     /**
-     * Управляет размером кеша метаданных (LRU стратегия)
+     * Управляет размером кеша метаданных (LRU стратегия). Лимит = maxCachedRanges.
      */
     function manageMetadataCacheSize(): void {
-        if (maxCachedMetadata <= 0) {
+        if (maxCachedRanges <= 0) {
             return;
         }
-        if (fileMetadataCache.size >= maxCachedMetadata) {
+        if (fileMetadataCache.size >= maxCachedRanges) {
             const firstKey = fileMetadataCache.keys().next().value;
             if (firstKey) {
                 fileMetadataCache.delete(firstKey);
@@ -601,10 +594,8 @@ export function serveRangeRequests(
             ) {
                 manageCacheSize();
                 rangeCache.set(cacheKey, { data, headers });
-                if (maxCachedMetadata > 0) {
-                    manageMetadataCacheSize();
-                    fileMetadataCache.set(url, result.metadata);
-                }
+                manageMetadataCacheSize();
+                fileMetadataCache.set(url, result.metadata);
 
                 if (enableLogging) {
                     const rangeSize = range.end - range.start + 1;

@@ -31,7 +31,6 @@ serveRangeRequests({
 | `cacheName`                   | `string`   | -                             | **Обязательно.** Имя кеша                                                                      |
 | `order`                       | `number`   | `-10`                         | Порядок выполнения (опционально)                                                               |
 | `maxCachedRanges`             | `number`   | `100`                         | Макс. число кешируемых диапазонов (см. ниже)                                                   |
-| `maxCachedMetadata`           | `number`   | `200`                         | Макс. число файлов, для которых хранятся метаданные (см. ниже)                                 |
 | `maxCacheableRangeSize`       | `number`   | `10MB`                        | Макс. размер одной кешируемой записи (см. ниже)                                                |
 | `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | Сколько диапазонов одного файла читать параллельно (см. ниже)                                   |
 | `prioritizeLatestRequest`    | `boolean`  | `true`                        | Режим очереди: видео/перемотка vs карты/документы (см. ниже)                                   |
@@ -60,11 +59,8 @@ serveRangeRequests({
 
 ---
 
-**Кеш метаданных (`maxCachedMetadata`)**  
-Плагин запоминает размер и тип уже обработанных файлов, чтобы не лезть в Cache API лишний раз. Задайте значение по числу **разных** файлов, с которыми работают за сессию: плейлист из 50 треков — десятки, каталог из сотен документов — сотни. Размер файлов на лимит не влияет.
-
 **Кеш диапазонов (`maxCachedRanges`, `maxCacheableRangeSize`)**  
-Плагин может кешировать готовые ответы по диапазонам. **maxCachedRanges** — сколько таких ответов держать в памяти. **maxCacheableRangeSize** — верхняя граница: диапазоны крупнее не кешируются (защита от переполнения). Вытеснение по LRU — при переполнении удаляются самые старые записи. Для видео и аудио при перемотках кеш не используется — ставьте 0.
+Плагин кеширует готовые ответы по диапазонам и метаданные файлов (размер, тип) для тех же URL. **maxCachedRanges** ограничивает и то и другое — сколько ответов и записей метаданных держать в памяти. **maxCacheableRangeSize** — верхняя граница на один диапазон; диапазоны крупнее не кешируются (защита от переполнения). Вытеснение по LRU. Для видео и аудио при перемотках ставьте **maxCachedRanges** в 0 — кеш не используется.
 
 **Параллелизм (`maxConcurrentRangesPerUrl`)**  
 Действует только при `prioritizeLatestRequest: true`. Для видео и аудио оптимально 1 — очереди тормозят. При `false` ограничение не применяется — все запросы параллельно.
@@ -94,7 +90,6 @@ initServiceWorker(
             include: ['*.mp4', '*.webm', '*.mkv'], // Видео
             maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
             maxCachedRanges: 0,
-            maxCachedMetadata: 0,
             maxConcurrentRangesPerUrl: 1,
             prioritizeLatestRequest: true,
         }),
@@ -103,7 +98,6 @@ initServiceWorker(
             include: ['*.mp3', '*.flac', '*.wav'], // Аудио
             maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
             maxCachedRanges: 0,
-            maxCachedMetadata: 0,
             maxConcurrentRangesPerUrl: 1,
             prioritizeLatestRequest: true,
         }),

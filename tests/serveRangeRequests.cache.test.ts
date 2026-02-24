@@ -53,7 +53,6 @@ describe('serveRangeRequests — cache limits', () => {
         const plugin: ServiceWorkerPlugin = serveRangeRequests({
             cacheName: 'test-cache',
             maxCachedRanges: 0,
-            maxCachedMetadata: 0,
         });
 
         const fetchEvent = createFetchEvent(
@@ -74,11 +73,10 @@ describe('serveRangeRequests — cache limits', () => {
         expect(cacheMatchSpy).toHaveBeenCalledTimes(2);
     });
 
-    it('не кеширует метаданные при maxCachedMetadata = 0 (повторные вызовы не ломаются)', async () => {
+    it('повторные вызовы не ломаются при maxCachedRanges = 0', async () => {
         const plugin: ServiceWorkerPlugin = serveRangeRequests({
             cacheName: 'test-cache',
             maxCachedRanges: 0,
-            maxCachedMetadata: 0,
         });
 
         const fetchEvent = createFetchEvent(
