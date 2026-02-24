@@ -134,21 +134,34 @@ export function serveRangeRequests(
         let position = 0;
 
         const reader = stream.getReader();
+        if (signal) {
+            signal.addEventListener(
+                'abort',
+                () => {
+                    reader.cancel().catch(() => {});
+                },
+                { once: true }
+            );
+        }
         const result = new Uint8Array(range.end - range.start + 1);
 
         try {
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             while (true) {
                 if (signal?.aborted) {
-                    try {
-                        await reader.cancel();
-                    } catch {
-                        // ignore cancel errors
-                    }
                     throw new Error('Request aborted');
                 }
 
-                const { done, value } = await reader.read();
+                let chunk: ReadableStreamReadResult<Uint8Array>;
+                try {
+                    chunk = await reader.read();
+                } catch (readError) {
+                    if (signal?.aborted) {
+                        throw new Error('Request aborted');
+                    }
+                    throw readError;
+                }
+                const { done, value } = chunk;
                 if (done) {
                     break;
                 }
@@ -430,8 +443,11 @@ export function serveRangeRequests(
                     return { data, headers, range };
                 } catch (error) {
                     const isAbort =
-                        error instanceof Error &&
-                        error.message === 'Request aborted';
+                        (error instanceof Error &&
+                            error.message === 'Request aborted') ||
+                        (typeof DOMException !== 'undefined' &&
+                            error instanceof DOMException &&
+                            error.name === 'AbortError');
                     if (!isAbort) {
                         cacheInstance = null;
                     }

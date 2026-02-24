@@ -16,11 +16,11 @@ importers:
         specifier: ^1.10.9
         version: 1.10.9
       '@types/serviceworker':
-        specifier: ^0.0.191
-        version: 0.0.191
+        specifier: ^0.0.192
+        version: 0.0.192
       '@types/web':
-        specifier: ^0.0.336
-        version: 0.0.336
+        specifier: ^0.0.338
+        version: 0.0.338
       prettier:
         specifier: ^3.6.2
         version: 3.8.1
@@ -348,11 +348,11 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
-  '@types/serviceworker@0.0.191':
-    resolution: {integrity: sha512-DFQspa5cuobxgUuoeGGYBW45oOvPvgYp68Yk24mLdMGGGcgoH0nj5TawBZdRpIqPV8kkZodcQrqradnwGhRVNQ==}
+  '@types/serviceworker@0.0.192':
+    resolution: {integrity: sha512-v9ve7JDYs3JnWow0OcSEtodcxlArlmOGFxb7nPMMRzQd8wEBueKA8wIvzQj8OQWeMd75DuqB2RCLoKxZByEbhw==}
 
-  '@types/web@0.0.336':
-    resolution: {integrity: sha512-BF63oBTS3D5d1XEKR2fou32PlxSqiaYZxTCchI/eeS/q6f51mKQdcVvFJcLUPsiO8G6KyEPlSYVvhQfa1KVeSw==}
+  '@types/web@0.0.338':
+    resolution: {integrity: sha512-zek7Yu+9x/lfD40oA4Biw7GZuV7yIcvNAlhxGh+40NLO13G7rC2qeNqegcSthV6wq3L2z+8+ERj3GXgjoU1MvA==}
 
   '@vitest/expect@4.0.18':
     resolution: {integrity: sha512-8sCWUyckXXYvx4opfzVY03EOiYVxyNrHS5QxX3DAIi5dpJAAkyJezHCP77VMX4HKA2LDT/Jpfo8i2r5BE3GnQQ==}
@@ -741,9 +741,9 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
-  '@types/serviceworker@0.0.191': {}
+  '@types/serviceworker@0.0.192': {}
 
-  '@types/web@0.0.336': {}
+  '@types/web@0.0.338': {}
 
   '@vitest/expect@4.0.18':
     dependencies:
