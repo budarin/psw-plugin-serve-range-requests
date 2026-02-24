@@ -34,28 +34,56 @@ serveRangeRequests({
 
 ## Options
 
-| Option                      | Type       | Default                       | Description                                                                                        |
-| --------------------------- | ---------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| `cacheName`                 | `string`   | -                             | **Required.** Cache name                                                                           |
-| `order`                     | `number`   | `-10`                         | Plugin execution order (optional)                                                                  |
-| `maxCachedRanges`           | `number`   | `100`                         | Max number of cached ranges (see below)                                                            |
-| `maxCachedMetadata`         | `number`   | `200`                         | Max number of files to keep metadata for (see below)                                               |
-| `maxCacheableRangeSize`     | `number`   | `10MB`                        | Max size of a single cached range (see below)                                                      |
-| `include`                   | `string[]` | -                             | File glob patterns to include                                                                      |
-| `exclude`                   | `string[]` | -                             | File glob patterns to exclude                                                                      |
-| `rangeResponseCacheControl` | `string`   | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
-| `enableLogging`             | `boolean`  | `false`                       | Verbose logging                                                                                    |
+| Option                        | Type       | Default                       | Description                                                                                        |
+| ----------------------------- | ---------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| `cacheName`                   | `string`   | -                             | **Required.** Cache name                                                                           |
+| `order`                       | `number`   | `-10`                         | Plugin execution order (optional)                                                                  |
+| `maxCachedRanges`             | `number`   | `100`                         | Max number of cached ranges (see below)                                                            |
+| `maxCachedMetadata`           | `number`   | `200`                         | Max number of files to keep metadata for (see below)                                               |
+| `maxCacheableRangeSize`       | `number`   | `10MB`                        | Max size of a single cached range (see below)                                                      |
+| `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | How many ranges of one file to read in parallel (see below)                                        |
+| `prioritizeLatestRequest`     | `boolean`  | `true`                        | Queue mode: video/scrubbing vs maps/docs (see below)                                               |
+| `include`                     | `string[]` | -                             | File glob patterns to include                                                                      |
+| `exclude`                     | `string[]` | -                             | File glob patterns to exclude                                                                      |
+| `rangeResponseCacheControl`   | `string`   | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
+| `enableLogging`               | `boolean`  | `false`                       | Verbose logging                                                                                    |
 
-**Metadata cache (`maxCachedMetadata`)**
-The plugin keeps metadata for files it has already served so that repeat Range requests to the same file are faster. Set this to roughly how many **different** files of this type users typically open or play in a session. If they often switch between many items (e.g. a long playlist, a large document list), use a higher value (hundreds). If they usually work with just a few files at a time, a lower value (tens) is enough. File size does not affect this limit—only the number of distinct URLs matters.
+## When to cache what — by scenario
 
-**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**
-The plugin caches every range response it serves, so that repeated requests for the same part of a file (e.g. rewind, replay) are served from memory. Eviction is LRU: when the limit is reached, the least recently used (oldest) entries are dropped. **maxCachedRanges** is how many range responses to keep—more if users often jump back to the same parts. **maxCacheableRangeSize** is only an upper cap: ranges larger than this are not cached (to avoid one huge entry using too much memory). There is no minimum size—any requested range that fits under the cap is cached.
+The plugin caches two things: **file metadata** (size, type) and **ready range responses**. Whether range caching helps depends on how users interact with the content.
 
-**206 responses and browser cache**
+### Video and audio: range cache is not used when scrubbing
+
+When scrubbing video, each seek requests a **new** part of the file. You jump to 15 min — bytes 50–60 MB. Jump to 30 min — bytes 100–110 MB. Jump back to 15 min — that’s often a different range (different offset, different chunk). Even when you land in the same area, it’s rare. In practice, scrubbing almost never hits a previously cached range — the range cache does little for video and just wastes memory.
+
+For video, set **maxCachedRanges** to 0 — the range cache is not used. What matters more: during scrubbing the browser sends dozens of requests and cancels the old ones. With `prioritizeLatestRequest: true`, the plugin prioritizes the latest request and aborts redundant work — scrubbing stays fast.
+
+### Maps and tiles: cache is very useful
+
+When panning and zooming, the same tiles are requested over and over. The same range in pmtiles/mbtiles is fetched many times — range cache gives a real boost. Use higher **maxCachedRanges** (500–1000). All requests matter and there’s little cancellation — use `prioritizeLatestRequest: false`.
+
+### Documents (PDF, etc.): cache helps when flipping pages
+
+Users flip back and forth — the same pages are requested again. Range cache helps. Use `prioritizeLatestRequest: false` so all requests run in order.
+
+---
+
+**Metadata cache (`maxCachedMetadata`)**  
+The plugin remembers size and type of files it has already served so it doesn’t hit Cache API unnecessarily. Set this to roughly how many **different** files users open or play in a session: a playlist of 50 tracks — tens; a catalog of hundreds of docs — hundreds. File size doesn’t affect this limit.
+
+**Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**  
+The plugin can cache ready range responses. **maxCachedRanges** — how many to keep in memory. **maxCacheableRangeSize** — upper cap; larger ranges are not cached (to avoid memory spikes). Eviction is LRU. For video and audio scrubbing, the cache is not used — don’t waste memory on it.
+
+**Concurrency (`maxConcurrentRangesPerUrl`)**  
+How many ranges of one file to read in parallel. For maps — 4–8 to load several tiles at once. For video and audio — 2–4, otherwise scrubbing creates too many competing requests.
+
+**Prioritize latest request (`prioritizeLatestRequest`)**  
+`true` (default) — for video and audio: when scrubbing, only the latest request matters; old ones are aborted and slots go to the new one. `false` — for maps and docs: all requests matter, they run in order, no abort.
+
+**206 responses and browser cache**  
 By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).
 
-When choosing option values, focus on the real traffic profile of your resources. You can inspect and analyze all requests to your assets in the browser DevTools `Network` panel.
+When tuning options, look at real traffic — use the Network tab in DevTools.
 
 ## Important notes
 
@@ -73,13 +101,13 @@ initServiceWorker(
             cacheName: 'media-cache',
             include: ['*.mp4', '*.webm', '*.mkv'], // Video
             maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
-            maxCachedRanges: 30,
+            maxCachedRanges: 0,
         }),
         serveRangeRequests({
             cacheName: 'media-cache',
             include: ['*.mp3', '*.flac', '*.wav'], // Audio
             maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
-            maxCachedRanges: 200,
+            maxCachedRanges: 0,
         }),
     ],
     { version: '1.0.0' }

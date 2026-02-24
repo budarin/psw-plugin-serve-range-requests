@@ -15,24 +15,28 @@ declare global {
 
 /**
  * 🎬 Пресет для видео файлов (ЧАСТО используется)
- * ✅ Медиаплееры всегда используют Range запросы для перемотки и буферизации
+ * ✅ Медиаплееры используют Range для перемотки и буферизации.
+ * Кеш диапазонов почти бесполезен — при перемотке каждый seek запрашивает новый участок,
+ * в ранее закешированный почти никогда не попадаешь. maxCachedRanges: 0.
  */
 export const VIDEO_PRESET = {
     include: ['*.mp4', '*.webm', '*.mkv', '*.avi', '*.mov', '*.m4v'],
     maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB — верхняя граница одной записи
-    maxCachedRanges: 30,
+    maxCachedRanges: 0, // при перемотках кеш не используется
     maxCachedMetadata: 100,
+    prioritizeLatestRequest: true,
 } as const;
 
 /**
  * 🎵 Пресет для аудио файлов (ЧАСТО используется)
- * ✅ Аудиоплееры используют Range запросы для перемотки, особенно длинные треки
+ * ✅ Аудиоплееры используют Range для перемотки. При перемотке кеш не используется — как у видео.
  */
 export const AUDIO_PRESET = {
     include: ['*.mp3', '*.flac', '*.wav', '*.m4a', '*.ogg', '*.aac'],
     maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
-    maxCachedRanges: 200,
+    maxCachedRanges: 0,
     maxCachedMetadata: 500,
+    prioritizeLatestRequest: true,
 } as const;
 
 /**
@@ -44,6 +48,7 @@ export const MAPS_PRESET = {
     maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
     maxCachedRanges: 1000,
     maxCachedMetadata: 200,
+    prioritizeLatestRequest: false,
 } as const;
 
 /**
@@ -55,6 +60,7 @@ export const DOCS_PRESET = {
     maxCacheableRangeSize: 5 * 1024 * 1024, // 5MB
     maxCachedRanges: 150,
     maxCachedMetadata: 50,
+    prioritizeLatestRequest: false,
 } as const;
 
 /**
@@ -84,11 +90,9 @@ export function getAdaptivePresets() {
             VIDEO_ADAPTIVE: {
                 ...VIDEO_PRESET,
                 maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
-                maxCachedRanges: 5,
             },
             AUDIO_ADAPTIVE: {
                 ...AUDIO_PRESET,
-                maxCachedRanges: 25, // Очень мало
             },
             MAPS_ADAPTIVE: {
                 ...MAPS_PRESET,
@@ -106,11 +110,9 @@ export function getAdaptivePresets() {
             VIDEO_ADAPTIVE: {
                 ...VIDEO_PRESET,
                 maxCacheableRangeSize: 10 * 1024 * 1024, // 10MB
-                maxCachedRanges: 20,
             },
             AUDIO_ADAPTIVE: {
                 ...AUDIO_PRESET,
-                maxCachedRanges: 150, // Умеренно меньше
             },
             MAPS_ADAPTIVE: {
                 ...MAPS_PRESET,

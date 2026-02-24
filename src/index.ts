@@ -55,7 +55,9 @@ export interface RangePluginOptions {
      */
     order?: number;
     /**
-     * Максимальное количество закешированных range-ответов (по умолчанию 100)
+     * Максимальное количество закешированных range-ответов (по умолчанию 100).
+     * Для видео при перемотках почти бесполезно — каждый seek запрашивает новый диапазон,
+     * повторное попадание в тот же участок редко. Для карт и документов — полезно.
      */
     maxCachedRanges?: number;
     /**
@@ -70,7 +72,7 @@ export interface RangePluginOptions {
     enableLogging?: boolean;
     /**
      * Максимальный размер одной кешируемой записи (диапазона) в байтах (по умолчанию 10MB).
-     * Диапазоны больше этого размера не кешируются — защита от переполнения памяти.
+     * Диапазоны больше не кешируются — защита от переполнения памяти.
      */
     maxCacheableRangeSize?: number;
     /**
@@ -93,9 +95,16 @@ export interface RangePluginOptions {
     rangeResponseCacheControl?: string;
     /**
      * Максимум одновременных чтений диапазонов на один URL (по умолчанию 4).
-     * Позволяет параллельно загружать тайлы карт; ограничивает конкуренцию при перемотке видео.
+     * Карты: 4–8 для параллельной загрузки тайлов. Видео: 2–4, иначе при перемотке
+     * слишком много конкурирующих запросов.
      */
     maxConcurrentRangesPerUrl?: number;
+    /**
+     * true (по умолчанию) — видео/аудио: при перемотке важен только последний запрос,
+     * старые отменяются, слоты отдаются новому. false — карты/документы: все запросы
+     * важны, выполняются по порядку, без отмен.
+     */
+    prioritizeLatestRequest?: boolean;
 }
 
 /**
@@ -118,6 +127,7 @@ export function serveRangeRequests(
         exclude,
         rangeResponseCacheControl = 'max-age=31536000, immutable',
         maxConcurrentRangesPerUrl = 4,
+        prioritizeLatestRequest = true,
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
@@ -126,35 +136,87 @@ export function serveRangeRequests(
     const fileMetadataCache = new Map<UrlString, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
-    // Ограничение параллелизма по URL (семафор)
+    /** Очередь: { resolve, wake }. LIFO — последний запрос получает слот первым. */
+    interface QueuedWaiter {
+        resolve: (release: (() => void) | null) => void;
+        wake: () => void;
+    }
+
     const urlSemaphore = new Map<
         UrlString,
-        { count: number; queue: Array<() => void> }
+        {
+            count: number;
+            queue: QueuedWaiter[];
+            abortController: AbortController;
+        }
     >();
 
-    function acquireRangeSlot(url: UrlString): Promise<() => void> {
+    function getOrCreateUrlState(url: UrlString): NonNullable<
+        ReturnType<typeof urlSemaphore.get>
+    > {
         let state = urlSemaphore.get(url);
         if (!state) {
-            state = { count: 0, queue: [] };
+            state = {
+                count: 0,
+                queue: [],
+                abortController: new AbortController(),
+            };
             urlSemaphore.set(url, state);
         }
-        return new Promise<() => void>((resolve) => {
+        return state;
+    }
+
+    /**
+     * Объединяет request.signal и url AbortController — при отмене любого работа останавливается.
+     */
+    function mergeAbortSignals(
+        requestSignal: AbortSignal,
+        urlSignal: AbortSignal
+    ): AbortSignal {
+        if (requestSignal.aborted || urlSignal.aborted) {
+            return requestSignal;
+        }
+        if (typeof AbortSignal.any === 'function') {
+            return AbortSignal.any([requestSignal, urlSignal]);
+        }
+        const ac = new AbortController();
+        const abort = () => ac.abort();
+        requestSignal.addEventListener('abort', abort, { once: true });
+        urlSignal.addEventListener('abort', abort, { once: true });
+        return ac.signal;
+    }
+
+    function acquireRangeSlot(url: UrlString): Promise<(() => void) | null> {
+        const state = getOrCreateUrlState(url);
+
+        return new Promise<(() => void) | null>((resolve) => {
             const release = () => {
-                state!.count--;
-                if (state!.queue.length > 0) {
-                    const next = state!.queue.shift()!;
-                    next();
+                state.count--;
+                if (state.queue.length > 0) {
+                    const next = prioritizeLatestRequest
+                        ? state.queue.pop()!
+                        : state.queue.shift()!;
+                    next.wake();
                 }
             };
+
+            const wake = () => {
+                state.count++;
+                resolve(release);
+            };
+
             if (state.count < maxConcurrentRangesPerUrl) {
                 state.count++;
                 resolve(release);
-            } else {
-                state.queue.push(() => {
-                    state!.count++;
-                    resolve(release);
-                });
+                return;
             }
+
+            if (prioritizeLatestRequest) {
+                state.abortController.abort();
+                state.abortController = new AbortController();
+            }
+
+            state.queue.push({ resolve, wake });
         });
     }
 
@@ -384,10 +446,12 @@ export function serveRangeRequests(
                 return addCacheHeaders(response, rangeResponseCacheControl);
             }
 
+            const requestAbortController = new AbortController();
             const abortPromise = new Promise<null>((resolve) => {
-                signal.addEventListener('abort', () => resolve(null), {
-                    once: true,
-                });
+                signal.addEventListener('abort', () => {
+                    requestAbortController.abort();
+                    resolve(null);
+                }, { once: true });
             });
 
             const workPromise = (async (): Promise<{
@@ -401,11 +465,22 @@ export function serveRangeRequests(
                 ]);
                 if (!release) return null;
 
+                let workSignal = mergeAbortSignals(
+                    signal,
+                    requestAbortController.signal
+                );
+                if (prioritizeLatestRequest) {
+                    workSignal = mergeAbortSignals(
+                        workSignal,
+                        getOrCreateUrlState(url).abortController.signal
+                    );
+                }
+
                 try {
-                    if (signal.aborted) return null;
+                    if (workSignal.aborted) return null;
 
                     const cache = await getCache();
-                    if (signal.aborted) return null;
+                    if (workSignal.aborted) return null;
 
                     let cachedResponse: Response | undefined;
                     try {
@@ -429,7 +504,7 @@ export function serveRangeRequests(
                         }
                         return null;
                     }
-                    if (signal.aborted) return null;
+                    if (workSignal.aborted) return null;
 
                     const metadata =
                         extractMetadataFromResponse(cachedResponse);
@@ -475,12 +550,12 @@ export function serveRangeRequests(
                         }
                         return null;
                     }
-                    if (signal.aborted) return null;
+                    if (workSignal.aborted) return null;
 
                     const data = await readRangeFromStream(
                         cachedResponse.body,
                         range,
-                        signal
+                        workSignal
                     );
 
                     const headers = new Headers({

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.17] - 2026-02-24
+
+### Added
+
+- **Option `prioritizeLatestRequest`** (default `true`): For video/audio — LIFO queue, abort current work when a new request queues. For maps/docs — FIFO, no abort, all requests run in order.
+- **Per-request AbortController**: When the browser cancels a request, the plugin aborts the work immediately so orphaned reads do not block slots.
+
+### Changed
+
+- **VIDEO_PRESET, AUDIO_PRESET**: `maxCachedRanges: 0` — range cache is not used when scrubbing; each seek requests a new byte range.
+- **Queue**: LIFO when `prioritizeLatestRequest: true`; FIFO when `false`. Abort current work on new queue entry only when `true`.
+- **Documentation**: Section "Когда что кешировать" — when to cache by scenario (video/audio vs maps vs docs).
+
 ## [1.0.16] - 2026-02-23
 
 ### Added
