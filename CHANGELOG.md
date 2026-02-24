@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.16] - 2026-02-23
+
+### Added
+
+- **Option `maxConcurrentRangesPerUrl`** (default 4): Limits concurrent range reads per URL. Enables parallel tile loading for maps while preventing 20+ simultaneous reads during video seek from blocking the active request.
+
+### Changed
+
+- **Concurrency control**: Semaphore per URL instead of unbounded parallelism; aborted requests release slots quickly so the active one gets through.
+
 ## [1.0.15] - 2026-02-23
 
 ### Fixed

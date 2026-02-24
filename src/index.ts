@@ -91,6 +91,11 @@ export interface RangePluginOptions {
      * Можно задать свою строку (например `no-store`, `max-age=3600`) или пустую, чтобы не выставлять.
      */
     rangeResponseCacheControl?: string;
+    /**
+     * Максимум одновременных чтений диапазонов на один URL (по умолчанию 4).
+     * Позволяет параллельно загружать тайлы карт; ограничивает конкуренцию при перемотке видео.
+     */
+    maxConcurrentRangesPerUrl?: number;
 }
 
 /**
@@ -112,6 +117,7 @@ export function serveRangeRequests(
         include,
         exclude,
         rangeResponseCacheControl = 'max-age=31536000, immutable',
+        maxConcurrentRangesPerUrl = 4,
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
@@ -120,6 +126,37 @@ export function serveRangeRequests(
     const fileMetadataCache = new Map<UrlString, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
+    // Ограничение параллелизма по URL (семафор)
+    const urlSemaphore = new Map<
+        UrlString,
+        { count: number; queue: Array<() => void> }
+    >();
+
+    function acquireRangeSlot(url: UrlString): Promise<() => void> {
+        let state = urlSemaphore.get(url);
+        if (!state) {
+            state = { count: 0, queue: [] };
+            urlSemaphore.set(url, state);
+        }
+        return new Promise<() => void>((resolve) => {
+            const release = () => {
+                state!.count--;
+                if (state!.queue.length > 0) {
+                    const next = state!.queue.shift()!;
+                    next();
+                }
+            };
+            if (state.count < maxConcurrentRangesPerUrl) {
+                state.count++;
+                resolve(release);
+            } else {
+                state.queue.push(() => {
+                    state!.count++;
+                    resolve(release);
+                });
+            }
+        });
+    }
 
     /**
      * Читает указанный диапазон байтов из потока.
@@ -347,11 +384,23 @@ export function serveRangeRequests(
                 return addCacheHeaders(response, rangeResponseCacheControl);
             }
 
+            const abortPromise = new Promise<null>((resolve) => {
+                signal.addEventListener('abort', () => resolve(null), {
+                    once: true,
+                });
+            });
+
             const workPromise = (async (): Promise<{
                 data: ArrayBuffer;
                 headers: Headers;
                 range: Range;
             } | null> => {
+                const release = await Promise.race([
+                    acquireRangeSlot(url),
+                    abortPromise.then(() => null),
+                ]);
+                if (!release) return null;
+
                 try {
                     if (signal.aborted) return null;
 
@@ -458,14 +507,10 @@ export function serveRangeRequests(
                         );
                     }
                     return null;
+                } finally {
+                    release();
                 }
             })();
-
-            const abortPromise = new Promise<null>((resolve) => {
-                signal.addEventListener('abort', () => resolve(null), {
-                    once: true,
-                });
-            });
 
             const result = await Promise.race([workPromise, abortPromise]);
             if (!result) {
