@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.19] - 2026-02-24
+
+### Fixed
+
+- **`fileMetadataCache`**: Restored read path — metadata is now read from cache when available (with Content-Length validation). Write only when writing to range cache (data cache).
+
+### Changed
+
+- **Queue → single `nextWaiter`**: When `prioritizeLatestRequest: true`, one waiting request instead of array; new request cancels previous via `resolve(null)`.
+- **Early exits**: Reordered fetch handler — `!rangeHeader` and `method` checked before `signal.aborted` for faster skip of non-range requests.
+- **Optimizations**: Removed redundant `prioritizeLatestRequest` check in `acquireRangeSlot`.
+
 ## [1.0.18] - 2026-02-24
 
 ### Changed

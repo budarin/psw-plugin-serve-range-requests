@@ -135,15 +135,15 @@ export function serveRangeRequests(
     const fileMetadataCache = new Map<UrlString, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
-    /** Очередь: { resolve, wake }. LIFO — последний запрос получает слот первым. */
-    interface QueuedWaiter {
+    /** Единственный ожидающий слот. При новом запросе предыдущий отменяется через resolve(null). */
+    interface NextWaiter {
         resolve: (release: (() => void) | null) => void;
         wake: () => void;
     }
 
     type UrlState = {
         count: number;
-        queue: QueuedWaiter[];
+        nextWaiter: NextWaiter | null;
         abortController: AbortController;
     };
     let urlSemaphore: Map<UrlString, UrlState> | null = null;
@@ -156,7 +156,7 @@ export function serveRangeRequests(
         if (!state) {
             state = {
                 count: 0,
-                queue: [],
+                nextWaiter: null,
                 abortController: new AbortController(),
             };
             urlSemaphore!.set(url, state);
@@ -194,8 +194,10 @@ export function serveRangeRequests(
         return new Promise<(() => void) | null>((resolve) => {
             const release = () => {
                 state.count--;
-                if (state.queue.length > 0) {
-                    state.queue.pop()!.wake();
+                const waiter = state.nextWaiter;
+                state.nextWaiter = null;
+                if (waiter) {
+                    waiter.wake();
                 }
             };
 
@@ -210,12 +212,15 @@ export function serveRangeRequests(
                 return;
             }
 
-            if (prioritizeLatestRequest) {
-                state.abortController.abort();
-                state.abortController = new AbortController();
+            state.abortController.abort();
+            state.abortController = new AbortController();
+            const prev = state.nextWaiter;
+            state.nextWaiter = null;
+            if (prev) {
+                prev.resolve(null);
             }
 
-            state.queue.push({ resolve, wake });
+            state.nextWaiter = { resolve, wake };
         });
     }
 
@@ -397,26 +402,21 @@ export function serveRangeRequests(
 
         async fetch(event: FetchEvent): FetchResponse {
             const request = event.request;
-            const signal = request.signal;
             const rangeHeader = request.headers.get(HEADER_RANGE);
 
-            // Если запрос уже отменён — не делаем ничего
+            if (!rangeHeader) {
+                return;
+            }
+            if (request.method !== 'GET') {
+                return;
+            }
+            const signal = request.signal;
             if (signal.aborted) {
                 if (enableLogging) {
                     console.log(
                         `serveRangeRequests plugin: abort handling for ${request.url} (signal already aborted)`
                     );
                 }
-                return;
-            }
-
-            // Если нет заголовка Range, пропускаем
-            if (!rangeHeader) {
-                return;
-            }
-
-            // Обрабатываем только GET запросы
-            if (request.method !== 'GET') {
                 return;
             }
 
@@ -457,6 +457,7 @@ export function serveRangeRequests(
                 data: ArrayBuffer;
                 headers: Headers;
                 range: Range;
+                metadata: FileMetadata;
             } | null> => {
                 const release = await Promise.race([
                     acquireRangeSlot(url),
@@ -505,8 +506,18 @@ export function serveRangeRequests(
                     }
                     if (workSignal.aborted) return null;
 
-                    const metadata =
-                        extractMetadataFromResponse(cachedResponse);
+                    let metadata = fileMetadataCache.get(url);
+                    if (metadata) {
+                        const contentLength =
+                            cachedResponse.headers.get(HEADER_CONTENT_LENGTH);
+                        if (contentLength !== String(metadata.size)) {
+                            metadata = undefined;
+                        }
+                    }
+                    if (!metadata) {
+                        metadata =
+                            extractMetadataFromResponse(cachedResponse);
+                    }
                     if (!metadata) {
                         if (enableLogging) {
                             console.log(
@@ -514,16 +525,6 @@ export function serveRangeRequests(
                             );
                         }
                         return null;
-                    }
-
-                    if (maxCachedMetadata > 0) {
-                        manageMetadataCacheSize();
-                        fileMetadataCache.set(url, metadata);
-                        if (enableLogging) {
-                            console.log(
-                                `serveRangeRequests plugin: cached metadata for ${url}, size: ${metadata.size}`
-                            );
-                        }
                     }
 
                     const ifRangeHeader = request.headers.get('If-Range');
@@ -563,7 +564,7 @@ export function serveRangeRequests(
                         [HEADER_CONTENT_TYPE]: metadata.type,
                     });
 
-                    return { data, headers, range };
+                    return { data, headers, range, metadata };
                 } catch (error) {
                     const isAbort =
                         (error instanceof Error &&
@@ -600,6 +601,10 @@ export function serveRangeRequests(
             ) {
                 manageCacheSize();
                 rangeCache.set(cacheKey, { data, headers });
+                if (maxCachedMetadata > 0) {
+                    manageMetadataCacheSize();
+                    fileMetadataCache.set(url, result.metadata);
+                }
 
                 if (enableLogging) {
                     const rangeSize = range.end - range.start + 1;

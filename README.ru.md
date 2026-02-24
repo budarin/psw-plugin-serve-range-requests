@@ -67,7 +67,7 @@ serveRangeRequests({
 Плагин может кешировать готовые ответы по диапазонам. **maxCachedRanges** — сколько таких ответов держать в памяти. **maxCacheableRangeSize** — верхняя граница: диапазоны крупнее не кешируются (защита от переполнения). Вытеснение по LRU — при переполнении удаляются самые старые записи. Для видео и аудио при перемотках кеш не используется — ставьте 0.
 
 **Параллелизм (`maxConcurrentRangesPerUrl`)**  
-Действует только при `prioritizeLatestRequest: true`. Для видео и аудио — 2–4, иначе при перемотке слишком много конкурирующих запросов. При `false` ограничение не применяется — все запросы параллельно.
+Действует только при `prioritizeLatestRequest: true`. Для видео и аудио оптимально 1 — очереди тормозят. При `false` ограничение не применяется — все запросы параллельно.
 
 **Приоритет последнего запроса (`prioritizeLatestRequest`)**  
 `true` (по умолчанию) — для видео и аудио: семафор, LIFO-очередь, abort при новом запросе. `false` — для карт и документов: без очередей, все запросы выполняются параллельно.
@@ -94,12 +94,18 @@ initServiceWorker(
             include: ['*.mp4', '*.webm', '*.mkv'], // Видео
             maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
             maxCachedRanges: 0,
+            maxCachedMetadata: 0,
+            maxConcurrentRangesPerUrl: 1,
+            prioritizeLatestRequest: true,
         }),
         serveRangeRequests({
             cacheName: 'media-cache',
             include: ['*.mp3', '*.flac', '*.wav'], // Аудио
             maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
             maxCachedRanges: 0,
+            maxCachedMetadata: 0,
+            maxConcurrentRangesPerUrl: 1,
+            prioritizeLatestRequest: true,
         }),
     ],
     { version: '1.0.0' }

@@ -75,7 +75,7 @@ The plugin remembers size and type of files it has already served so it doesn’
 The plugin can cache ready range responses. **maxCachedRanges** — how many to keep in memory. **maxCacheableRangeSize** — upper cap; larger ranges are not cached (to avoid memory spikes). Eviction is LRU. For video and audio scrubbing, the cache is not used — don’t waste memory on it.
 
 **Concurrency (`maxConcurrentRangesPerUrl`)**  
-Only applies when `prioritizeLatestRequest: true`. For video and audio — 2–4, otherwise scrubbing creates too many competing requests. When `false`, no limit — all requests run in parallel.
+Only applies when `prioritizeLatestRequest: true`. For video and audio, 1 is optimal — queues slow things down. When `false`, no limit — all requests run in parallel.
 
 **Prioritize latest request (`prioritizeLatestRequest`)**  
 `true` (default) — for video and audio: semaphore, LIFO queue, abort on new request. `false` — for maps and docs: no queues, all requests run in parallel.
@@ -102,12 +102,18 @@ initServiceWorker(
             include: ['*.mp4', '*.webm', '*.mkv'], // Video
             maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
             maxCachedRanges: 0,
+            maxCachedMetadata: 0,
+            maxConcurrentRangesPerUrl: 1,
+            prioritizeLatestRequest: true,
         }),
         serveRangeRequests({
             cacheName: 'media-cache',
             include: ['*.mp3', '*.flac', '*.wav'], // Audio
             maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
             maxCachedRanges: 0,
+            maxCachedMetadata: 0,
+            maxConcurrentRangesPerUrl: 1,
+            prioritizeLatestRequest: true,
         }),
     ],
     { version: '1.0.0' }
