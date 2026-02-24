@@ -340,7 +340,11 @@ export function serveRangeRequests(
                 range: Range;
             } | null> => {
                 try {
+                    if (signal.aborted) return null;
+
                     const cache = await getCache();
+                    if (signal.aborted) return null;
+
                     let cachedResponse: Response | undefined;
                     try {
                         cachedResponse = await cache.match(url);
@@ -363,6 +367,7 @@ export function serveRangeRequests(
                         }
                         return null;
                     }
+                    if (signal.aborted) return null;
 
                     const metadata =
                         extractMetadataFromResponse(cachedResponse);
@@ -408,6 +413,7 @@ export function serveRangeRequests(
                         }
                         return null;
                     }
+                    if (signal.aborted) return null;
 
                     const data = await readRangeFromStream(
                         cachedResponse.body,
@@ -423,8 +429,13 @@ export function serveRangeRequests(
 
                     return { data, headers, range };
                 } catch (error) {
-                    cacheInstance = null;
-                    if (enableLogging) {
+                    const isAbort =
+                        error instanceof Error &&
+                        error.message === 'Request aborted';
+                    if (!isAbort) {
+                        cacheInstance = null;
+                    }
+                    if (!isAbort && enableLogging) {
                         console.error(
                             `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
                             error

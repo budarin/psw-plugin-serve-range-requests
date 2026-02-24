@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.14] - 2026-02-23
+
+### Fixed
+
+- **Abort handling**: When a fetch request is canceled (e.g. during video seek), the plugin now stops processing immediately instead of continuing to read and serve the range. Early `signal.aborted` checks added throughout the work pipeline; `readRangeFromStream` cancels the reader and throws when aborted; `Promise.race` with abort ensures the handler returns as soon as the client cancels.
+
 ## [1.0.13] - 2026-02-23
 
 ### Fixed
