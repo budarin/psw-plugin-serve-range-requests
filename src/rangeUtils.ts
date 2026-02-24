@@ -112,11 +112,18 @@ export function shouldCacheRange(
 }
 
 /**
+ * Проверяет, соответствует ли pathname указанному glob-паттерну.
+ */
+function matchesGlobByPath(pathname: string, pattern: GlobPattern): boolean {
+    return getRegexForPattern(pattern).test(pathname);
+}
+
+/**
  * Проверяет, соответствует ли URL указанному glob-паттерну (по pathname).
  */
 export function matchesGlob(url: UrlString, pattern: GlobPattern): boolean {
     const pathname = new URL(url, 'https://example.com').pathname;
-    return getRegexForPattern(pattern).test(pathname);
+    return matchesGlobByPath(pathname, pattern);
 }
 
 /**
@@ -127,16 +134,18 @@ export function shouldProcessFile(
     include?: GlobPattern[],
     exclude?: GlobPattern[]
 ): boolean {
+    const pathname = new URL(url, 'https://example.com').pathname;
+
     if (exclude && exclude.length > 0) {
         for (const pattern of exclude) {
-            if (matchesGlob(url, pattern)) {
+            if (matchesGlobByPath(pathname, pattern)) {
                 return false;
             }
         }
     }
     if (include && include.length > 0) {
         for (const pattern of include) {
-            if (matchesGlob(url, pattern)) {
+            if (matchesGlobByPath(pathname, pattern)) {
                 return true;
             }
         }

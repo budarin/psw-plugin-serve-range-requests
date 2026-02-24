@@ -60,11 +60,11 @@ For video, set **maxCachedRanges** to 0 — the range cache is not used. What ma
 
 ### Maps and tiles: cache is very useful
 
-When panning and zooming, the same tiles are requested over and over. The same range in pmtiles/mbtiles is fetched many times — range cache gives a real boost. Use higher **maxCachedRanges** (500–1000). All requests matter and there’s little cancellation — use `prioritizeLatestRequest: false`.
+When panning and zooming, the same tiles are requested over and over. The same range in pmtiles/mbtiles is fetched many times — range cache gives a real boost. Use higher **maxCachedRanges** (500–1000). `prioritizeLatestRequest: false` — no queues, all requests in parallel.
 
 ### Documents (PDF, etc.): cache helps when flipping pages
 
-Users flip back and forth — the same pages are requested again. Range cache helps. Use `prioritizeLatestRequest: false` so all requests run in order.
+Users flip back and forth — the same pages are requested again. Range cache helps. `prioritizeLatestRequest: false` — no queues, all requests in parallel.
 
 ---
 
@@ -75,10 +75,10 @@ The plugin remembers size and type of files it has already served so it doesn’
 The plugin can cache ready range responses. **maxCachedRanges** — how many to keep in memory. **maxCacheableRangeSize** — upper cap; larger ranges are not cached (to avoid memory spikes). Eviction is LRU. For video and audio scrubbing, the cache is not used — don’t waste memory on it.
 
 **Concurrency (`maxConcurrentRangesPerUrl`)**  
-How many ranges of one file to read in parallel. For maps — 4–8 to load several tiles at once. For video and audio — 2–4, otherwise scrubbing creates too many competing requests.
+Only applies when `prioritizeLatestRequest: true`. For video and audio — 2–4, otherwise scrubbing creates too many competing requests. When `false`, no limit — all requests run in parallel.
 
 **Prioritize latest request (`prioritizeLatestRequest`)**  
-`true` (default) — for video and audio: when scrubbing, only the latest request matters; old ones are aborted and slots go to the new one. `false` — for maps and docs: all requests matter, they run in order, no abort.
+`true` (default) — for video and audio: semaphore, LIFO queue, abort on new request. `false` — for maps and docs: no queues, all requests run in parallel.
 
 **206 responses and browser cache**  
 By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).

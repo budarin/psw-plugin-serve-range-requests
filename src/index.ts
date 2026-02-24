@@ -100,9 +100,8 @@ export interface RangePluginOptions {
      */
     maxConcurrentRangesPerUrl?: number;
     /**
-     * true (по умолчанию) — видео/аудио: при перемотке важен только последний запрос,
-     * старые отменяются, слоты отдаются новому. false — карты/документы: все запросы
-     * важны, выполняются по порядку, без отмен.
+     * true (по умолчанию) — видео/аудио: семафор, LIFO-очередь, abort при новом запросе.
+     * false — карты/документы: без очередей, все запросы параллельно.
      */
     prioritizeLatestRequest?: boolean;
 }
@@ -142,18 +141,17 @@ export function serveRangeRequests(
         wake: () => void;
     }
 
-    const urlSemaphore = new Map<
-        UrlString,
-        {
-            count: number;
-            queue: QueuedWaiter[];
-            abortController: AbortController;
-        }
-    >();
+    type UrlState = {
+        count: number;
+        queue: QueuedWaiter[];
+        abortController: AbortController;
+    };
+    let urlSemaphore: Map<UrlString, UrlState> | null = null;
 
-    function getOrCreateUrlState(url: UrlString): NonNullable<
-        ReturnType<typeof urlSemaphore.get>
-    > {
+    function getOrCreateUrlState(url: UrlString): UrlState {
+        if (!urlSemaphore) {
+            urlSemaphore = new Map();
+        }
         let state = urlSemaphore.get(url);
         if (!state) {
             state = {
@@ -161,7 +159,7 @@ export function serveRangeRequests(
                 queue: [],
                 abortController: new AbortController(),
             };
-            urlSemaphore.set(url, state);
+            urlSemaphore!.set(url, state);
         }
         return state;
     }
@@ -187,16 +185,17 @@ export function serveRangeRequests(
     }
 
     function acquireRangeSlot(url: UrlString): Promise<(() => void) | null> {
+        if (!prioritizeLatestRequest) {
+            return Promise.resolve(() => {});
+        }
+
         const state = getOrCreateUrlState(url);
 
         return new Promise<(() => void) | null>((resolve) => {
             const release = () => {
                 state.count--;
                 if (state.queue.length > 0) {
-                    const next = prioritizeLatestRequest
-                        ? state.queue.pop()!
-                        : state.queue.shift()!;
-                    next.wake();
+                    state.queue.pop()!.wake();
                 }
             };
 
