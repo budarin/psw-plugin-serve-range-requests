@@ -42,6 +42,7 @@ serveRangeRequests({
 | `maxCacheableRangeSize`       | `number`   | `10MB`                        | Max size of a single cached range (see below)                                                      |
 | `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | How many ranges of one file to read in parallel (see below)                                        |
 | `prioritizeLatestRequest`     | `boolean`  | `true`                        | Queue mode: video/scrubbing vs maps/docs (see below)                                               |
+| `restoreMissingToCache`       | `boolean`  | `true`                        | On cache miss: return undefined and background-fetch full file into cache (restore evicted cache)  |
 | `include`                     | `string[]` | -                             | File glob patterns to include                                                                      |
 | `exclude`                     | `string[]` | -                             | File glob patterns to exclude                                                                      |
 | `rangeResponseCacheControl`   | `string`   | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
@@ -182,10 +183,11 @@ initServiceWorker(
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
-4. Reads the requested byte range from the file.
-5. Caches the ready‑to‑use partial response.
-6. Returns HTTP `206 Partial Content`.
+3. If the file is missing and `restoreMissingToCache` is true, returns `undefined` (next plugin handles the request) and starts a background fetch to restore the file into cache for future requests.
+4. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
+5. Reads the requested byte range from the file.
+6. Caches the ready‑to‑use partial response.
+7. Returns HTTP `206 Partial Content`.
 
 ---
 

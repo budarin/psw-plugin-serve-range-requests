@@ -98,6 +98,12 @@ export interface RangePluginOptions {
      * false — карты/документы: без очередей, все запросы параллельно.
      */
     prioritizeLatestRequest?: boolean;
+    /**
+     * true (по умолчанию) — при отсутствии файла в кеше возвращать undefined и параллельно
+     * запускать фоновую загрузку в кеш (восстановление повреждённого кеша по аналогии с restoreAssetToCache).
+     * false — только возвращать undefined, без восстановления.
+     */
+    restoreMissingToCache?: boolean;
 }
 
 /**
@@ -120,6 +126,7 @@ export function serveRangeRequests(
         rangeResponseCacheControl = 'max-age=31536000, immutable',
         maxConcurrentRangesPerUrl = 4,
         prioritizeLatestRequest = true,
+        restoreMissingToCache = true,
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
@@ -128,6 +135,8 @@ export function serveRangeRequests(
     const fileMetadataCache = new Map<UrlString, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
+    /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
+    const restoreInProgress = new Set<UrlString>();
     /** Единственный ожидающий слот. При новом запросе предыдущий отменяется через resolve(null). */
     interface NextWaiter {
         resolve: (release: (() => void) | null) => void;
@@ -509,6 +518,31 @@ export function serveRangeRequests(
                             console.log(
                                 `serveRangeRequests plugin: skipping ${url} (file not in cache)`
                             );
+                        }
+                        if (restoreMissingToCache && !restoreInProgress.has(url)) {
+                            restoreInProgress.add(url);
+                            const fullRequest = new Request(url, {
+                                method: 'GET',
+                            });
+                            fetch(fullRequest)
+                                .then((response) => {
+                                    if (response.ok) {
+                                        return getCache().then((c) =>
+                                            c.put(fullRequest, response)
+                                        );
+                                    }
+                                })
+                                .catch(() => {
+                                    // Игнорируем ошибки restore — следующий запрос попробует снова
+                                })
+                                .finally(() => {
+                                    restoreInProgress.delete(url);
+                                    if (enableLogging) {
+                                        console.log(
+                                            `serveRangeRequests plugin: restore finished for ${url}`
+                                        );
+                                    }
+                                });
                         }
                         return null;
                     }
