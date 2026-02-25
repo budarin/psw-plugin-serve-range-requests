@@ -104,6 +104,11 @@ export interface RangePluginOptions {
      * false — только возвращать undefined, без восстановления.
      */
     restoreMissingToCache?: boolean;
+    /**
+     * Таймаут ожидания restore в мс (по умолчанию 120000). При cache miss, если restore уже идёт,
+     * ждём завершения до этого времени, чтобы отдать из кеша вместо сетевого запроса (избегаем ERR_FAILED).
+     */
+    restoreWaitTimeout?: number;
 }
 
 /**
@@ -127,6 +132,7 @@ export function serveRangeRequests(
         maxConcurrentRangesPerUrl = 4,
         prioritizeLatestRequest = true,
         restoreMissingToCache = true,
+        restoreWaitTimeout = 120_000,
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
@@ -137,6 +143,8 @@ export function serveRangeRequests(
     let cacheInstance: Cache | null = null;
     /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
     const restoreInProgress = new Set<UrlString>();
+    /** Promise завершения restore по URL — для ожидания при cache miss */
+    const restorePromises = new Map<UrlString, Promise<void>>();
     /** Единственный ожидающий слот. При новом запросе предыдущий отменяется через resolve(null). */
     interface NextWaiter {
         resolve: (release: (() => void) | null) => void;
@@ -514,37 +522,82 @@ export function serveRangeRequests(
                     }
 
                     if (!cachedResponse) {
-                        if (enableLogging) {
-                            console.log(
-                                `serveRangeRequests plugin: skipping ${url} (file not in cache)`
-                            );
-                        }
-                        if (restoreMissingToCache && !restoreInProgress.has(url)) {
-                            restoreInProgress.add(url);
-                            const fullRequest = new Request(url, {
-                                method: 'GET',
-                            });
-                            fetch(fullRequest)
-                                .then((response) => {
-                                    if (response.ok) {
-                                        return getCache().then((c) =>
-                                            c.put(fullRequest, response)
-                                        );
+                        if (restoreMissingToCache && restoreInProgress.has(url)) {
+                            const restorePromise = restorePromises.get(url);
+                            if (restorePromise) {
+                                const timeoutPromise = new Promise<never>(
+                                    (_, reject) =>
+                                        setTimeout(
+                                            () =>
+                                                reject(
+                                                    new Error(
+                                                        'Restore timeout'
+                                                    )
+                                                ),
+                                            restoreWaitTimeout
+                                        )
+                                );
+                                const abortReject = abortPromise.then(
+                                    () => {
+                                        throw new Error('Request aborted');
                                     }
-                                })
-                                .catch(() => {
+                                ) as Promise<never>;
+                                try {
+                                    await Promise.race([
+                                        restorePromise,
+                                        timeoutPromise,
+                                        abortReject,
+                                    ]);
+                                } catch {
+                                    // timeout or abort — fall through
+                                }
+                                if (workSignal.aborted) return null;
+                                try {
+                                    cachedResponse =
+                                        await cache.match(url);
+                                } catch {
+                                    cacheInstance = null;
+                                    return null;
+                                }
+                            }
+                        } else if (
+                            restoreMissingToCache &&
+                            !restoreInProgress.has(url)
+                        ) {
+                            restoreInProgress.add(url);
+                            const restorePromise = (async () => {
+                                try {
+                                    const fullRequest = new Request(url, {
+                                        method: 'GET',
+                                    });
+                                    const response =
+                                        await fetch(fullRequest);
+                                    if (response.ok) {
+                                        const c = await getCache();
+                                        await c.put(fullRequest, response);
+                                    }
+                                } catch {
                                     // Игнорируем ошибки restore — следующий запрос попробует снова
-                                })
-                                .finally(() => {
+                                } finally {
                                     restoreInProgress.delete(url);
+                                    restorePromises.delete(url);
                                     if (enableLogging) {
                                         console.log(
                                             `serveRangeRequests plugin: restore finished for ${url}`
                                         );
                                     }
-                                });
+                                }
+                            })();
+                            restorePromises.set(url, restorePromise);
                         }
-                        return null;
+                        if (!cachedResponse) {
+                            if (enableLogging) {
+                                console.log(
+                                    `serveRangeRequests plugin: skipping ${url} (file not in cache)`
+                                );
+                            }
+                            return null;
+                        }
                     }
                     if (workSignal.aborted) return null;
 

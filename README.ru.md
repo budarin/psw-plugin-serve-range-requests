@@ -35,6 +35,7 @@ serveRangeRequests({
 | `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | Сколько диапазонов одного файла читать параллельно (см. ниже)                                   |
 | `prioritizeLatestRequest`    | `boolean`  | `true`                        | Режим очереди: видео/перемотка vs карты/документы (см. ниже)                                   |
 | `restoreMissingToCache`      | `boolean`  | `true`                        | При отсутствии в кеше: вернуть undefined и в фоне загрузить файл в кеш (восстановление evicted) |
+| `restoreWaitTimeout`         | `number`   | `120000`                      | При идущем restore ждать до этого числа мс перед fallback (избегает ERR_FAILED из-за конкуренции с сетью) |
 | `include`                     | `string[]` | -                             | Маски файлов (glob)                                                                            |
 | `exclude`                     | `string[]` | -                             | Исключения (glob)                                                                              |
 | `rangeResponseCacheControl`   | `string`   | `max-age=31536000, immutable` | Cache-Control для ответов 206 (кеш браузера); можно задать `no-store`, `max-age=3600` или `''` |
@@ -175,7 +176,7 @@ initServiceWorker(
 
 1. Проверяет заголовок Range в запросе
 2. Ищет файл в указанном кеше
-3. При отсутствии файла и `restoreMissingToCache: true` возвращает `undefined` (следующий плагин обработает запрос) и в фоне загружает файл в кеш для будущих запросов
+3. При отсутствии файла и `restoreMissingToCache: true`: если restore уже идёт — ждёт его (до `restoreWaitTimeout`) и повторяет чтение из кеша; иначе возвращает `undefined` и в фоне загружает файл в кеш для будущих запросов
 4. При наличии If-Range (ETag или Last-Modified) отдаёт из кеша только при совпадении сохранённого валидатора (иначе передаёт запрос дальше)
 5. Читает нужный диапазон из файла
 6. Кеширует готовый ответ для повторного использования
