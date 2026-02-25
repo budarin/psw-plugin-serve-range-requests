@@ -5,6 +5,7 @@ import type {
 
 import {
     HEADER_RANGE,
+    HEADER_CACHE_CONTROL,
     HEADER_CONTENT_TYPE,
     HEADER_CONTENT_RANGE,
     HEADER_CONTENT_LENGTH,
@@ -16,7 +17,6 @@ import { HTTP_STATUS_PARTIAL_CONTENT } from '@budarin/http-constants/statuses';
 import { MIME_APPLICATION_OCTET_STREAM } from '@budarin/http-constants/mime-types';
 
 import type { RangeCacheKey, UrlString } from './types.js';
-import { addCacheHeaders } from './addCacheHeaders.js';
 import {
     type Range,
     parseRangeHeader,
@@ -158,23 +158,42 @@ export function serveRangeRequests(
     }
 
     /**
-     * Объединяет request.signal и url AbortController — при отмене любого работа останавливается.
+     * Объединяет несколько AbortSignal — при отмене любого работа останавливается.
      */
-    function mergeAbortSignals(
-        requestSignal: AbortSignal,
-        urlSignal: AbortSignal
-    ): AbortSignal {
-        if (requestSignal.aborted || urlSignal.aborted) {
-            return requestSignal;
+    function mergeAbortSignals(...signals: AbortSignal[]): AbortSignal {
+        const aborted = signals.find((s) => s.aborted);
+        if (aborted) {
+            return aborted;
         }
         if (typeof AbortSignal.any === 'function') {
-            return AbortSignal.any([requestSignal, urlSignal]);
+            return AbortSignal.any(signals);
         }
         const ac = new AbortController();
         const abort = () => ac.abort();
-        requestSignal.addEventListener('abort', abort, { once: true });
-        urlSignal.addEventListener('abort', abort, { once: true });
+        for (const s of signals) {
+            s.addEventListener('abort', abort, { once: true });
+        }
         return ac.signal;
+    }
+
+    /**
+     * Создаёт заголовки для 206-ответа с опциональным Cache-Control.
+     */
+    function buildRangeResponseHeaders(
+        range: Range,
+        metadata: FileMetadata,
+        dataByteLength: number,
+        cacheControl?: string
+    ): Headers {
+        const headers = new Headers({
+            [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
+            [HEADER_CONTENT_LENGTH]: String(dataByteLength),
+            [HEADER_CONTENT_TYPE]: metadata.type,
+        });
+        if (cacheControl) {
+            headers.set(HEADER_CACHE_CONTROL, cacheControl);
+        }
+        return headers;
     }
 
     function acquireRangeSlot(url: UrlString): Promise<(() => void) | null> {
@@ -431,11 +450,10 @@ export function serveRangeRequests(
                 maxCachedRanges > 0 ? getCachedRange(cacheKey) : undefined;
             if (cachedRange) {
                 const { data, headers } = cachedRange;
-                const response = new Response(data, {
+                return new Response(data, {
                     headers,
                     status: HTTP_STATUS_PARTIAL_CONTENT,
                 });
-                return addCacheHeaders(response, rangeResponseCacheControl);
             }
 
             const requestAbortController = new AbortController();
@@ -458,16 +476,13 @@ export function serveRangeRequests(
                 ]);
                 if (!release) return null;
 
-                let workSignal = mergeAbortSignals(
-                    signal,
-                    requestAbortController.signal
-                );
-                if (prioritizeLatestRequest) {
-                    workSignal = mergeAbortSignals(
-                        workSignal,
-                        getOrCreateUrlState(url).abortController.signal
-                    );
-                }
+                const workSignal = prioritizeLatestRequest
+                    ? mergeAbortSignals(
+                          signal,
+                          requestAbortController.signal,
+                          getOrCreateUrlState(url).abortController.signal
+                      )
+                    : mergeAbortSignals(signal, requestAbortController.signal);
 
                 try {
                     if (workSignal.aborted) return null;
@@ -551,11 +566,12 @@ export function serveRangeRequests(
                         workSignal
                     );
 
-                    const headers = new Headers({
-                        [HEADER_CONTENT_RANGE]: `bytes ${String(range.start)}-${String(range.end)}/${String(metadata.size)}`,
-                        [HEADER_CONTENT_LENGTH]: String(data.byteLength),
-                        [HEADER_CONTENT_TYPE]: metadata.type,
-                    });
+                    const headers = buildRangeResponseHeaders(
+                        range,
+                        metadata,
+                        data.byteLength,
+                        rangeResponseCacheControl
+                    );
 
                     return { data, headers, range, metadata };
                 } catch (error) {
@@ -610,12 +626,10 @@ export function serveRangeRequests(
                 );
             }
 
-            const response = new Response(data, {
+            return new Response(data, {
                 status: HTTP_STATUS_PARTIAL_CONTENT,
                 headers,
             });
-
-            return addCacheHeaders(response, rangeResponseCacheControl);
         },
     };
 }

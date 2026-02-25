@@ -63,8 +63,8 @@ describe('serveRangeRequests — cache limits', () => {
             })
         );
 
-        const first = await plugin.fetch?.(fetchEvent, logger);
-        const second = await plugin.fetch?.(fetchEvent, logger);
+        const first = await plugin.fetch?.(fetchEvent, { logger });
+        const second = await plugin.fetch?.(fetchEvent, { logger });
 
         expect(first).toBeDefined();
         expect(second).toBeDefined();
@@ -87,8 +87,8 @@ describe('serveRangeRequests — cache limits', () => {
             })
         );
 
-        const first = await plugin.fetch?.(fetchEvent, logger);
-        const second = await plugin.fetch?.(fetchEvent, logger);
+        const first = await plugin.fetch?.(fetchEvent, { logger });
+        const second = await plugin.fetch?.(fetchEvent, { logger });
 
         expect(first).toBeDefined();
         expect(second).toBeDefined();

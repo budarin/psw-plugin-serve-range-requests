@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.21] - 2026-02-25
+
+### Changed
+
+- **Compatibility**: Updated for `@budarin/pluggable-serviceworker` 1.11.0 — plugin handlers now receive `PluginContext` (with `logger?`, `base?`) instead of `Logger` directly.
+- **Performance**: Removed `addCacheHeaders` — 206 responses now use `buildRangeResponseHeaders` with Cache-Control set inline, avoiding one Response clone per request.
+- **Performance**: `mergeAbortSignals` now accepts multiple signals in a single call; when `prioritizeLatestRequest` is true, one merge instead of two.
+
+### Removed
+
+- **`addCacheHeaders` module**: Logic inlined into `buildRangeResponseHeaders`; module deleted.
+
 ## [1.0.20] - 2026-02-24
 
 ### Removed
