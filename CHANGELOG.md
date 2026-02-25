@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.0.25] - 2026-02-25
+
+### Removed
+
+- **Option `restoreWaitTimeout`**: Removed; only `restoreDelay` (agreed) remains.
+
 ## [1.0.24] - 2026-02-25
 
 ### Added
@@ -13,13 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.23] - 2026-02-25
 
-### Fixed
-
-- **ERR_FAILED on cache miss during restore**: When a range request hit cache miss while restore was already running, the request fell through to the network. Two heavy requests (restore + page) competed; the network request often failed with ERR_FAILED (headers only, no body). Now the plugin waits for the in-progress restore (up to `restoreWaitTimeout`) and serves from cache instead of letting the request go to the network.
-
 ### Added
 
-- **Option `restoreWaitTimeout`** (default `120000`): When cache miss and restore is in progress, wait up to this many ms for restore to complete before falling through. Prevents ERR_FAILED from network contention.
+- **Option `restoreWaitTimeout`** (later removed): Was added to wait for in-progress restore; removed per user feedback.
 
 ## [1.0.22] - 2026-02-25
 

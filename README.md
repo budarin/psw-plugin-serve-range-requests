@@ -43,7 +43,6 @@ serveRangeRequests({
 | `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | How many ranges of one file to read in parallel (see below)                                        |
 | `prioritizeLatestRequest`     | `boolean`  | `true`                        | Queue mode: video/scrubbing vs maps/docs (see below)                                               |
 | `restoreMissingToCache`       | `boolean`  | `true`                        | On cache miss: return undefined and background-fetch full file into cache (restore evicted cache)  |
-| `restoreWaitTimeout`          | `number`   | `120000`                      | When restore is in progress, wait up to this many ms before falling through (avoids ERR_FAILED from network contention) |
 | `restoreDelay`                | `number`   | `2500`                        | Delay in ms before starting restore on cache miss; lets initial requests go to network first, reducing ERR_FAILED |
 | `include`                     | `string[]` | -                             | File glob patterns to include                                                                      |
 | `exclude`                     | `string[]` | -                             | File glob patterns to exclude                                                                      |
@@ -185,7 +184,7 @@ initServiceWorker(
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the file is missing and `restoreMissingToCache` is true: if a restore is already in progress, waits for it (up to `restoreWaitTimeout`) and retries from cache; otherwise schedules a background restore after `restoreDelay` ms (or starts immediately if `restoreDelay` is 0) and returns `undefined`.
+3. If the file is missing and `restoreMissingToCache` is true, schedules a background restore after `restoreDelay` ms (or starts immediately if `restoreDelay` is 0) and returns `undefined`.
 4. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
 5. Reads the requested byte range from the file.
 6. Caches the ready‑to‑use partial response.

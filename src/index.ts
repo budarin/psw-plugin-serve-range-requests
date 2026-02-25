@@ -105,11 +105,6 @@ export interface RangePluginOptions {
      */
     restoreMissingToCache?: boolean;
     /**
-     * Таймаут ожидания restore в мс (по умолчанию 120000). При cache miss, если restore уже идёт,
-     * ждём завершения до этого времени, чтобы отдать из кеша вместо сетевого запроса (избегаем ERR_FAILED).
-     */
-    restoreWaitTimeout?: number;
-    /**
      * Задержка перед стартом restore в мс (по умолчанию 2500). При cache miss не запускаем restore сразу,
      * а откладываем — первые запросы идут в сеть без конкуренции, снижаем ERR_FAILED.
      */
@@ -137,7 +132,6 @@ export function serveRangeRequests(
         maxConcurrentRangesPerUrl = 4,
         prioritizeLatestRequest = true,
         restoreMissingToCache = true,
-        restoreWaitTimeout = 120_000,
         restoreDelay = 2500,
     } = options;
 
@@ -149,8 +143,6 @@ export function serveRangeRequests(
     let cacheInstance: Cache | null = null;
     /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
     const restoreInProgress = new Set<UrlString>();
-    /** Promise завершения restore по URL — для ожидания при cache miss */
-    const restorePromises = new Map<UrlString, Promise<void>>();
     /** URL с запланированным restore (таймер ещё не сработал) */
     const restoreScheduled = new Set<UrlString>();
     /** Единственный ожидающий слот. При новом запросе предыдущий отменяется через resolve(null). */
@@ -530,52 +522,14 @@ export function serveRangeRequests(
                     }
 
                     if (!cachedResponse) {
-                        if (restoreMissingToCache && restoreInProgress.has(url)) {
-                            const restorePromise = restorePromises.get(url);
-                            if (restorePromise) {
-                                const timeoutPromise = new Promise<never>(
-                                    (_, reject) =>
-                                        setTimeout(
-                                            () =>
-                                                reject(
-                                                    new Error(
-                                                        'Restore timeout'
-                                                    )
-                                                ),
-                                            restoreWaitTimeout
-                                        )
-                                );
-                                const abortReject = abortPromise.then(
-                                    () => {
-                                        throw new Error('Request aborted');
-                                    }
-                                ) as Promise<never>;
-                                try {
-                                    await Promise.race([
-                                        restorePromise,
-                                        timeoutPromise,
-                                        abortReject,
-                                    ]);
-                                } catch {
-                                    // timeout or abort — fall through
-                                }
-                                if (workSignal.aborted) return null;
-                                try {
-                                    cachedResponse =
-                                        await cache.match(url);
-                                } catch {
-                                    cacheInstance = null;
-                                    return null;
-                                }
-                            }
-                        } else if (
+                        if (
                             restoreMissingToCache &&
                             !restoreInProgress.has(url) &&
                             !restoreScheduled.has(url)
                         ) {
                             const runRestore = (): void => {
                                 restoreInProgress.add(url);
-                                const restorePromise = (async () => {
+                                (async () => {
                                     try {
                                         const fullRequest = new Request(
                                             url,
@@ -594,7 +548,6 @@ export function serveRangeRequests(
                                         // Игнорируем ошибки restore — следующий запрос попробует снова
                                     } finally {
                                         restoreInProgress.delete(url);
-                                        restorePromises.delete(url);
                                         if (enableLogging) {
                                             console.log(
                                                 `serveRangeRequests plugin: restore finished for ${url}`
@@ -602,7 +555,6 @@ export function serveRangeRequests(
                                         }
                                     }
                                 })();
-                                restorePromises.set(url, restorePromise);
                             };
 
                             if (restoreDelay > 0) {
