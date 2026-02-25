@@ -109,6 +109,11 @@ export interface RangePluginOptions {
      * ждём завершения до этого времени, чтобы отдать из кеша вместо сетевого запроса (избегаем ERR_FAILED).
      */
     restoreWaitTimeout?: number;
+    /**
+     * Задержка перед стартом restore в мс (по умолчанию 2500). При cache miss не запускаем restore сразу,
+     * а откладываем — первые запросы идут в сеть без конкуренции, снижаем ERR_FAILED.
+     */
+    restoreDelay?: number;
 }
 
 /**
@@ -133,6 +138,7 @@ export function serveRangeRequests(
         prioritizeLatestRequest = true,
         restoreMissingToCache = true,
         restoreWaitTimeout = 120_000,
+        restoreDelay = 2500,
     } = options;
 
     // Кеш для range-ответов (LRU через Map)
@@ -145,6 +151,8 @@ export function serveRangeRequests(
     const restoreInProgress = new Set<UrlString>();
     /** Promise завершения restore по URL — для ожидания при cache miss */
     const restorePromises = new Map<UrlString, Promise<void>>();
+    /** URL с запланированным restore (таймер ещё не сработал) */
+    const restoreScheduled = new Set<UrlString>();
     /** Единственный ожидающий слот. При новом запросе предыдущий отменяется через resolve(null). */
     interface NextWaiter {
         resolve: (release: (() => void) | null) => void;
@@ -562,33 +570,52 @@ export function serveRangeRequests(
                             }
                         } else if (
                             restoreMissingToCache &&
-                            !restoreInProgress.has(url)
+                            !restoreInProgress.has(url) &&
+                            !restoreScheduled.has(url)
                         ) {
-                            restoreInProgress.add(url);
-                            const restorePromise = (async () => {
-                                try {
-                                    const fullRequest = new Request(url, {
-                                        method: 'GET',
-                                    });
-                                    const response =
-                                        await fetch(fullRequest);
-                                    if (response.ok) {
-                                        const c = await getCache();
-                                        await c.put(fullRequest, response);
-                                    }
-                                } catch {
-                                    // Игнорируем ошибки restore — следующий запрос попробует снова
-                                } finally {
-                                    restoreInProgress.delete(url);
-                                    restorePromises.delete(url);
-                                    if (enableLogging) {
-                                        console.log(
-                                            `serveRangeRequests plugin: restore finished for ${url}`
+                            const runRestore = (): void => {
+                                restoreInProgress.add(url);
+                                const restorePromise = (async () => {
+                                    try {
+                                        const fullRequest = new Request(
+                                            url,
+                                            { method: 'GET' }
                                         );
+                                        const response =
+                                            await fetch(fullRequest);
+                                        if (response.ok) {
+                                            const c = await getCache();
+                                            await c.put(
+                                                fullRequest,
+                                                response
+                                            );
+                                        }
+                                    } catch {
+                                        // Игнорируем ошибки restore — следующий запрос попробует снова
+                                    } finally {
+                                        restoreInProgress.delete(url);
+                                        restorePromises.delete(url);
+                                        if (enableLogging) {
+                                            console.log(
+                                                `serveRangeRequests plugin: restore finished for ${url}`
+                                            );
+                                        }
                                     }
-                                }
-                            })();
-                            restorePromises.set(url, restorePromise);
+                                })();
+                                restorePromises.set(url, restorePromise);
+                            };
+
+                            if (restoreDelay > 0) {
+                                restoreScheduled.add(url);
+                                setTimeout(() => {
+                                    restoreScheduled.delete(url);
+                                    if (!restoreInProgress.has(url)) {
+                                        runRestore();
+                                    }
+                                }, restoreDelay);
+                            } else {
+                                runRestore();
+                            }
                         }
                         if (!cachedResponse) {
                             if (enableLogging) {

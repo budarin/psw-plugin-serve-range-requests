@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.24] - 2026-02-25
+
+### Added
+
+- **Option `restoreDelay`** (default `2500`): Delay in ms before starting restore on cache miss. Lets initial requests go to network without competing with restore, reducing ERR_FAILED and avoiding black screen on large files.
+
 ## [1.0.23] - 2026-02-25
 
 ### Fixed
