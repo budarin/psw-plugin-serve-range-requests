@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Cache miss behavior**: Instead of returning `undefined` (passing to next plugin), the plugin now fetches the requested range from the network directly. Avoids ERR_FAILED when restore and fallback compete; the range request goes through the plugin with `X-Serve-Range-Network-Fallback` header to bypass recursive handling.
+
 ## [1.0.25] - 2026-02-25
 
 ### Removed

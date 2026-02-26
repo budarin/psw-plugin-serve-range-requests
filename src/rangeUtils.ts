@@ -134,6 +134,9 @@ export function shouldProcessFile(
     include?: GlobPattern[],
     exclude?: GlobPattern[]
 ): boolean {
+    if (!include?.length && !exclude?.length) {
+        return true;
+    }
     const pathname = new URL(url, 'https://example.com').pathname;
 
     if (exclude && exclude.length > 0) {
@@ -152,4 +155,151 @@ export function shouldProcessFile(
         return false;
     }
     return true;
+}
+
+/**
+ * Читает указанный диапазон байтов из потока.
+ * Учитывает AbortSignal — при отмене запроса прекращает чтение.
+ */
+export async function readRangeFromStream(
+    stream: ReadableStream<Uint8Array>,
+    range: Range,
+    signal?: AbortSignal
+): Promise<ArrayBuffer> {
+    let offset = 0;
+    let position = 0;
+
+    const reader = stream.getReader();
+    if (signal) {
+        signal.addEventListener(
+            'abort',
+            () => {
+                reader.cancel().catch(() => {});
+            },
+            { once: true }
+        );
+    }
+    const result = new Uint8Array(range.end - range.start + 1);
+
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        while (true) {
+            if (signal?.aborted) {
+                throw new Error('Request aborted');
+            }
+
+            let chunk: ReadableStreamReadResult<Uint8Array>;
+            try {
+                chunk = await reader.read();
+            } catch (readError) {
+                if (signal?.aborted) {
+                    throw new Error('Request aborted');
+                }
+                throw readError;
+            }
+            const { done, value } = chunk;
+            if (done) {
+                break;
+            }
+
+            const chunkStart = position;
+            const chunkEnd = position + value.length;
+
+            position = chunkEnd;
+
+            if (chunkEnd < range.start) {
+                continue;
+            }
+
+            if (chunkStart > range.end) {
+                break;
+            }
+
+            const start = Math.max(range.start - chunkStart, 0);
+            const end = Math.min(range.end - chunkStart + 1, value.length);
+
+            if (start >= end) {
+                continue;
+            }
+
+            result.set(value.subarray(start, end), offset);
+            offset += end - start;
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    return result.buffer;
+}
+
+/**
+ * Создаёт ReadableStream, отдающий только указанный диапазон байтов из исходного потока.
+ * Используется для отдачи 206 без загрузки всего диапазона в память.
+ */
+export function createRangeStream(
+    sourceStream: ReadableStream<Uint8Array>,
+    range: Range,
+    signal?: AbortSignal
+): ReadableStream<Uint8Array> {
+    const reader = sourceStream.getReader();
+    let position = 0;
+
+    if (signal) {
+        signal.addEventListener(
+            'abort',
+            () => {
+                reader.cancel().catch(() => {});
+            },
+            { once: true }
+        );
+    }
+
+    return new ReadableStream<Uint8Array>({
+        async pull(controller): Promise<void> {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            while (true) {
+                if (signal?.aborted) {
+                    controller.error(new Error('Request aborted'));
+                    return;
+                }
+                let chunk: ReadableStreamReadResult<Uint8Array>;
+                try {
+                    chunk = await reader.read();
+                } catch (readError) {
+                    if (signal?.aborted) {
+                        controller.error(new Error('Request aborted'));
+                    } else {
+                        controller.error(readError);
+                    }
+                    return;
+                }
+                const { done, value } = chunk;
+                if (done) {
+                    controller.close();
+                    return;
+                }
+                const chunkStart = position;
+                const chunkEnd = position + value.length;
+                position = chunkEnd;
+
+                if (chunkEnd < range.start) {
+                    continue;
+                }
+                if (chunkStart > range.end) {
+                    controller.close();
+                    return;
+                }
+                const start = Math.max(range.start - chunkStart, 0);
+                const end = Math.min(range.end - chunkStart + 1, value.length);
+                if (start >= end) {
+                    continue;
+                }
+                controller.enqueue(value.slice(start, end));
+                return;
+            }
+        },
+        cancel(): void {
+            reader.cancel().catch(() => {});
+        },
+    });
 }

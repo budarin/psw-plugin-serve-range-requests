@@ -16,38 +16,25 @@ Applications that play or display large media—video, audio, PDFs—typically r
 
 ## Quick start
 
+In most cases you only need to pick a [built‑in preset](#built-in-presets-optional) and set the cache name. You can ignore the rest of the options.
+
 ```typescript
-import { serveRangeRequests } from '@budarin/psw-plugin-serve-range-requests';
+import { initServiceWorker } from '@budarin/pluggable-serviceworker';
+import { serveRangeRequests, VIDEO_PRESET } from '@budarin/psw-plugin-serve-range-requests';
 
-// Basic usage – only the required option
-serveRangeRequests({ cacheName: 'media-cache' });
-
-// With additional options
-serveRangeRequests({
-    cacheName: 'media-cache',
-    include: ['*.mp4', '*.mp3', '*.pdf'], // Only these file types
-    maxCacheableRangeSize: 5 * 1024 * 1024, // Max 5MB per range
-    maxCachedRanges: 50, // Up to 50 ranges kept in memory
-    enableLogging: true, // Enable debug logging
-});
+initServiceWorker(
+    [serveRangeRequests({ ...VIDEO_PRESET, cacheName: 'video-cache' })],
+    { version: '1.0.0' }
+);
 ```
 
-## Options
+Minimal setup without a preset — only the required option:
 
-| Option                        | Type       | Default                       | Description                                                                                        |
-| ----------------------------- | ---------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| `cacheName`                   | `string`   | -                             | **Required.** Cache name                                                                           |
-| `order`                       | `number`   | `-10`                         | Plugin execution order (optional)                                                                  |
-| `maxCachedRanges`             | `number`   | `100`                         | Max number of cached ranges (see below)                                                            |
-| `maxCacheableRangeSize`       | `number`   | `10MB`                        | Max size of a single cached range (see below)                                                      |
-| `maxConcurrentRangesPerUrl`   | `number`   | `4`                           | How many ranges of one file to read in parallel (see below)                                        |
-| `prioritizeLatestRequest`     | `boolean`  | `true`                        | Queue mode: video/scrubbing vs maps/docs (see below)                                               |
-| `restoreMissingToCache`       | `boolean`  | `true`                        | On cache miss: return undefined and background-fetch full file into cache (restore evicted cache)  |
-| `restoreDelay`                | `number`   | `2500`                        | Delay in ms before starting restore on cache miss; lets initial requests go to network first, reducing ERR_FAILED |
-| `include`                     | `string[]` | -                             | File glob patterns to include                                                                      |
-| `exclude`                     | `string[]` | -                             | File glob patterns to exclude                                                                      |
-| `rangeResponseCacheControl`   | `string`   | `max-age=31536000, immutable` | Cache-Control for 206 responses (browser cache); use e.g. `no-store` or `max-age=3600` to override |
-| `enableLogging`               | `boolean`  | `false`                       | Verbose logging                                                                                    |
+```typescript
+serveRangeRequests({ cacheName: 'media-cache' });
+```
+
+More on scenarios (video, maps, documents) below. [All options](#all-options) are at the end of this section.
 
 ## When to cache what — by scenario
 
@@ -76,12 +63,58 @@ The plugin caches ready range responses and file metadata (size, type) for the s
 Only applies when `prioritizeLatestRequest: true`. For video and audio, 1 is optimal — queues slow things down. When `false`, no limit — all requests run in parallel.
 
 **Prioritize latest request (`prioritizeLatestRequest`)**  
-`true` (default) — for video and audio: semaphore, LIFO queue, abort on new request. `false` — for maps and docs: no queues, all requests run in parallel.
+`true` (default) — for video and audio: prioritize the latest request, abort others on new request. `false` — for maps and docs: no queues, all requests run in parallel.
 
 **206 responses and browser cache**  
 By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).
 
 When tuning options, look at real traffic — use the Network tab in DevTools.
+
+## All options
+
+Options are grouped by purpose. Defaults work for most scenarios.
+
+### Core
+
+| Option        | Type     | Default | Description                    |
+| ------------- | -------- | ------- | ------------------------------ |
+| `cacheName`   | `string` | —       | **Required.** Cache name.      |
+| `order`       | `number` | `-10`   | Plugin execution order.        |
+
+### Range cache and memory
+
+| Option                  | Type     | Default | Description                                                                                                                                 |
+| ----------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxCachedRanges`       | `number` | `100`   | Max number of cached range responses (and metadata entries). For video scrubbing use 0. For maps/docs use 500–1000.                           |
+| `maxCacheableRangeSize` | `number` | `10MB`  | Max size of a single cached range; larger ranges are not cached.                                                                            |
+| `maxTrackedUrls`        | `number` | `512`   | Max number of different files (URLs) the plugin tracks for limiting concurrent requests per file. Caps memory when many different files are requested. |
+
+### Concurrency and priority
+
+| Option                      | Type      | Default | Description                                                                 |
+| --------------------------- | --------- | ------- | --------------------------------------------------------------------------- |
+| `maxConcurrentRangesPerUrl` | `number`  | `4`     | How many ranges of one file to read in parallel. For video often 1.        |
+| `prioritizeLatestRequest`  | `boolean` | `true`  | Prioritize latest request (video/audio). `false` for maps/docs.              |
+
+### Filters
+
+| Option    | Type       | Default | Description                          |
+| --------- | ---------- | ------- | ------------------------------------ |
+| `include` | `string[]` | —       | File glob patterns to process only.  |
+| `exclude` | `string[]` | —       | File glob patterns to exclude.       |
+
+### Restore and delivery
+
+| Option                    | Type      | Default                       | Description                                                                 |
+| ------------------------- | --------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `restoreMissingToCache`   | `boolean` | `true`                        | On cache miss: fetch from network and background-restore full file to cache. |
+| `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses. Empty string to omit.                       |
+
+### Debug
+
+| Option         | Type      | Default | Description    |
+| -------------- | --------- | ------- | -------------- |
+| `enableLogging` | `boolean` | `false` | Verbose logs.  |
 
 ## Important notes
 
@@ -89,43 +122,7 @@ When tuning options, look at real traffic — use the Network tab in DevTools.
 
 ## Usage example
 
-```typescript
-import { initServiceWorker } from '@budarin/pluggable-serviceworker';
-import { serveRangeRequests } from '@budarin/psw-plugin-serve-range-requests';
-
-initServiceWorker(
-    [
-        serveRangeRequests({
-            cacheName: 'media-cache',
-            include: ['*.mp4', '*.webm', '*.mkv'], // Video
-            maxCacheableRangeSize: 20 * 1024 * 1024, // 20MB
-            maxCachedRanges: 0,
-            maxConcurrentRangesPerUrl: 1,
-            prioritizeLatestRequest: true,
-        }),
-        serveRangeRequests({
-            cacheName: 'media-cache',
-            include: ['*.mp3', '*.flac', '*.wav'], // Audio
-            maxCacheableRangeSize: 8 * 1024 * 1024, // 8MB
-            maxCachedRanges: 0,
-            maxConcurrentRangesPerUrl: 1,
-            prioritizeLatestRequest: true,
-        }),
-    ],
-    { version: '1.0.0' }
-);
-```
-
-## Built‑in presets (optional)
-
-If you don’t want to tune all the options manually, you can use ready‑made presets:
-
-### Available presets
-
-- **VIDEO_PRESET** – for media players: `*.mp4`, `*.webm`, `*.mkv`, `*.avi`, `*.mov`, `*.m4v`
-- **AUDIO_PRESET** – for audio players: `*.mp3`, `*.flac`, `*.wav`, `*.m4a`, `*.ogg`, `*.aac`
-- **MAPS_PRESET** – for maps and tiles: `*.mbtiles`, `*.pmtiles`, `/tiles/*`, `/maps/*`, `*.mvt`
-- **DOCS_PRESET** – for documents: `*.pdf`, `*.epub`, `*.djvu`, `*.mobi`, `*.azw3`
+With presets (recommended):
 
 ```typescript
 import { initServiceWorker } from '@budarin/pluggable-serviceworker';
@@ -144,33 +141,39 @@ initServiceWorker(
 );
 ```
 
-### Adaptive presets
-
-All the presets above can be adapted to the device capabilities. On devices with low RAM and weak CPUs, the limits are automatically decreased to keep the app responsive.
+Manual config (when you need to tune):
 
 ```typescript
-import { initServiceWorker } from '@budarin/pluggable-serviceworker';
-import {
-    serveRangeRequests,
-    getAdaptivePresets,
-} from '@budarin/psw-plugin-serve-range-requests';
+serveRangeRequests({
+    cacheName: 'media-cache',
+    include: ['*.mp4', '*.webm', '*.mkv'],
+    maxCachedRanges: 0,
+    maxConcurrentRangesPerUrl: 1,
+    prioritizeLatestRequest: true,
+});
+```
 
-// Automatically adapts to device performance:
-// - Very low-end (<2GB RAM and <2 CPU cores): minimal limits
-// - Low-end (<4GB RAM or <4 CPU cores): reduced limits
-// - More powerful (>=4GB RAM and >=4 CPU cores): full preset settings
+## Built‑in presets (optional)
+
+If you don’t want to tune options manually, use ready‑made presets:
+
+### Available presets
+
+- **VIDEO_PRESET** – for media players: `*.mp4`, `*.webm`, `*.mkv`, `*.avi`, `*.mov`, `*.m4v`
+- **AUDIO_PRESET** – for audio players: `*.mp3`, `*.flac`, `*.wav`, `*.m4a`, `*.ogg`, `*.aac`
+- **MAPS_PRESET** – for maps and tiles: `*.mbtiles`, `*.pmtiles`, `/tiles/*`, `/maps/*`, `*.mvt`
+- **DOCS_PRESET** – for documents: `*.pdf`, `*.epub`, `*.djvu`, `*.mobi`, `*.azw3`
+
+### Adaptive presets
+
+All presets can be adapted to device capabilities. On devices with low RAM and weak CPUs, limits are automatically reduced.
+
+```typescript
+import { getAdaptivePresets } from '@budarin/psw-plugin-serve-range-requests';
+
 const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
     getAdaptivePresets();
-
-initServiceWorker(
-    [
-        serveRangeRequests({ ...VIDEO_ADAPTIVE, cacheName: 'video-cache' }),
-        serveRangeRequests({ ...AUDIO_ADAPTIVE, cacheName: 'audio-cache' }),
-        serveRangeRequests({ ...MAPS_ADAPTIVE, cacheName: 'maps-cache' }),
-        serveRangeRequests({ ...DOCS_ADAPTIVE, cacheName: 'docs-cache' }),
-    ],
-    { version: '1.0.0' }
-);
+// Use the same way: { ...VIDEO_ADAPTIVE, cacheName: 'video-cache' }
 ```
 
 ## Supported Range formats
@@ -184,15 +187,11 @@ initServiceWorker(
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the file is missing and `restoreMissingToCache` is true, schedules a background restore after `restoreDelay` ms (or starts immediately if `restoreDelay` is 0) and returns `undefined`.
+3. If the file is missing and `restoreMissingToCache` is true, the current request is served from the network (cancellable range request); a background restore fetches the full file into cache for subsequent requests.
 4. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
 5. Reads the requested byte range from the file.
 6. Caches the ready‑to‑use partial response.
 7. Returns HTTP `206 Partial Content`.
-
----
-
-**Tip**: In most cases it is enough to configure `cacheName` and a few `include` patterns.
 
 ## 🤝 License
 

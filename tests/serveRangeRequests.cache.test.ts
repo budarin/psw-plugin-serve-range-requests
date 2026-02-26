@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type {
-    Logger,
-    ServiceWorkerPlugin,
+import {
+    PSW_PASSTHROUGH_HEADER,
+    type Logger,
+    type ServiceWorkerPlugin,
 } from '@budarin/pluggable-serviceworker';
 import { serveRangeRequests } from '../src/index.js';
 
@@ -63,8 +64,9 @@ describe('serveRangeRequests — cache limits', () => {
             })
         );
 
-        const first = await plugin.fetch?.(fetchEvent, { logger });
-        const second = await plugin.fetch?.(fetchEvent, { logger });
+        const context = { logger, passthroughHeader: PSW_PASSTHROUGH_HEADER };
+        const first = await plugin.fetch?.(fetchEvent, context);
+        const second = await plugin.fetch?.(fetchEvent, context);
 
         expect(first).toBeDefined();
         expect(second).toBeDefined();
@@ -87,8 +89,9 @@ describe('serveRangeRequests — cache limits', () => {
             })
         );
 
-        const first = await plugin.fetch?.(fetchEvent, { logger });
-        const second = await plugin.fetch?.(fetchEvent, { logger });
+        const context = { logger, passthroughHeader: PSW_PASSTHROUGH_HEADER };
+        const first = await plugin.fetch?.(fetchEvent, context);
+        const second = await plugin.fetch?.(fetchEvent, context);
 
         expect(first).toBeDefined();
         expect(second).toBeDefined();
