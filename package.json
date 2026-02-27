@@ -26,7 +26,7 @@
         "@budarin/http-constants": "^1.0.22"
     },
     "devDependencies": {
-        "@budarin/pluggable-serviceworker": "^1.14.0",
+        "@budarin/pluggable-serviceworker": "^1.16.0",
         "@types/serviceworker": "^0.0.192",
         "@types/web": "^0.0.338",
         "prettier": "^3.6.2",

@@ -75,8 +75,8 @@ export interface RangePluginOptions {
     exclude?: string[];
     /**
      * Значение заголовка Cache-Control для ответов 206.
-     * По умолчанию `max-age=31536000, immutable` — браузер кеширует ответ надолго.
-     * Можно задать свою строку (например `no-store`, `max-age=3600`) или пустую, чтобы не выставлять.
+     * По умолчанию не задано — заголовок не выставляется.
+     * Можно передать строку (например `max-age=3600`) для других типов контента.
      */
     rangeResponseCacheControl?: string;
     /**
@@ -121,7 +121,7 @@ export function serveRangeRequests(
         enableLogging = false,
         include,
         exclude,
-        rangeResponseCacheControl = 'max-age=31536000, immutable',
+        rangeResponseCacheControl,
         maxConcurrentRangesPerUrl = 4,
         prioritizeLatestRequest = true,
         restoreMissingToCache = true,
@@ -349,9 +349,11 @@ export function serveRangeRequests(
             const doFallbackFetch = (): Promise<Response> => {
                 // Передаём заголовки как объект. Обязательно mode: 'cors': при mode no-cors (напр. от <video>)
                 // браузер оставляет только CORS-safelisted заголовки — Range и X-PSW-Passthrough снимаются.
+                // Range задаём явно из уже распарсенного rangeHeader, чтобы fallback всегда шёл за диапазоном.
                 const headerRecord: Record<string, string> = {
                     ...Object.fromEntries(request.headers.entries()),
                     [passthroughHeader]: '1',
+                    [HEADER_RANGE]: rangeHeader,
                 };
                 const fallbackRequest = new Request(request.url, {
                     method: request.method,
@@ -366,7 +368,7 @@ export function serveRangeRequests(
                         `serveRangeRequests plugin: fallback fetch for ${url}, passthroughHeader: '${String(passthroughHeader)}', has passthrough: ${passthroughHeader ? fallbackRequest.headers.has(passthroughHeader) : false}, request header keys: ${keys.join(', ')}`
                     );
                 }
-                return fetch(fallbackRequest);
+                return context.fetchPassthrough(fallbackRequest);
             };
 
             try {
@@ -443,7 +445,12 @@ export function serveRangeRequests(
                                     void (async (): Promise<void> => {
                                         try {
                                             const c = await getCache();
-                                            if (await matchByUrl(c, new Request(url))) {
+                                            if (
+                                                await matchByUrl(
+                                                    c,
+                                                    new Request(url)
+                                                )
+                                            ) {
                                                 if (enableLogging) {
                                                     console.log(
                                                         `serveRangeRequests plugin: restore skipped for ${url} (already in cache)`
@@ -461,8 +468,13 @@ export function serveRangeRequests(
                                                     },
                                                 }
                                             );
+                                            if (enableLogging) {
+                                                console.log(
+                                                    `serveRangeRequests plugin: restore fetch for ${url} (full file, no Range)`
+                                                );
+                                            }
                                             const response =
-                                                await fetch(fullRequest);
+                                                await context.fetchPassthrough(fullRequest);
                                             if (response.ok) {
                                                 await c.put(
                                                     fullRequest,
