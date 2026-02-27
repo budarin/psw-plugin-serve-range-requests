@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.26] - 2026-02-27
+
+### Added
+
+- **Option `assets`**: When set, background restore runs only for URLs in this list (precache/assets). When unset, restore may run for any URL on cache miss.
+- **Presets**: Built-in presets now include `rangeResponseCacheControl` for consistent 206 caching behavior out of the box.
+
 ### Changed
 
-- **Cache miss behavior**: Instead of returning `undefined` (passing to next plugin), the plugin now fetches the requested range from the network directly. Avoids ERR_FAILED when restore and fallback compete; the range request goes through the plugin with `X-Serve-Range-Network-Fallback` header to bypass recursive handling.
+- **Cache miss behavior**: On cache miss the plugin returns `undefined` (passes the request to the next plugin / network). If `restoreMissingToCache` is enabled, it starts a background restore that fetches the **full file** into Cache API for subsequent range requests.
+- **Internals**: `serveRangeRequests` handler flow was refactored (typed context, range slot manager integration, clearer cache/restore boundaries) without changing the public API (except the cache miss behavior above).
+- **Tests**: Cache mock now returns a fresh `Response` per `cache.match` call (Response bodies are streams and cannot be reused).
+
+### Removed
+
+- **Internal network fallback**: Removed the internal passthrough Range fallback path and its helper module (`src/fallback.ts`). Upstream passthrough for Range requests is expected to handle cache misses.
 
 ## [1.0.25] - 2026-02-25
 

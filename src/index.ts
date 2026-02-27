@@ -14,7 +14,6 @@ import type {
     RangeCacheKey,
     UrlString,
 } from './types.js';
-import { doFallbackFetch } from './fallback.js';
 import {
     createRangeSlotManager,
     mergeAbortSignals,
@@ -443,14 +442,6 @@ export function serveRangeRequests(
                 });
             }
 
-            const fallbackOptions = {
-                url,
-                rangeHeader,
-                passthroughHeader,
-                fetchPassthrough: context.fetchPassthrough,
-                enableLogging,
-            };
-
             const handlerContext: RangeHandlerContext = {
                 ...baseHandlerContext,
                 restoreOptions: {
@@ -496,27 +487,7 @@ export function serveRangeRequests(
                             'AbortError'
                         );
                     }
-
-                    const fallbackResponse = await doFallbackFetch(
-                        request,
-                        fallbackOptions
-                    );
-
-                    if (fallbackResponse.status !== 206) {
-                        console.warn(
-                            `[serveRangeRequests] Fallback for ${url} returned ${fallbackResponse.status} instead of 206. ` +
-                                'The next plugin (e.g. restore) is handling our internal fetch. ' +
-                                'It must skip requests with the passthrough header (context.passthroughHeader).'
-                        );
-                    }
-
-                    if (enableLogging) {
-                        console.log(
-                            `serveRangeRequests plugin: fallback response for ${url} status=${fallbackResponse.status}`
-                        );
-                    }
-
-                    return fallbackResponse;
+                    return;
                 }
 
                 const { stream, headers, range } = result;
@@ -554,8 +525,8 @@ export function serveRangeRequests(
                     headers,
                 });
             } catch (err) {
-                // Любое исключение до fallback (getCache, acquireRangeSlot и т.д.) не должно
-                // уходить во фреймворк — иначе следующий плагин (restore) отдаст 200 и весь файл.
+                // Любое исключение (getCache, acquireRangeSlot и т.д.) не должно ломать цепочку:
+                // возвращаем undefined, чтобы Range обработал следующий плагин/сеть.
                 if (signal.aborted) {
                     throw new DOMException(
                         'The operation was aborted.',
@@ -565,27 +536,11 @@ export function serveRangeRequests(
 
                 if (enableLogging) {
                     console.error(
-                        `serveRangeRequests plugin: unexpected error for ${url}, falling back to network:`,
+                        `serveRangeRequests plugin: unexpected error for ${url}, returning undefined to allow passthrough:`,
                         err
                     );
                 }
-
-                try {
-                    const fallbackResponse = await doFallbackFetch(
-                        request,
-                        fallbackOptions
-                    );
-
-                    if (enableLogging) {
-                        console.log(
-                            `serveRangeRequests plugin: fallback (after error) response for ${url} status=${fallbackResponse.status}`
-                        );
-                    }
-
-                    return fallbackResponse;
-                } catch (fetchErr) {
-                    throw fetchErr;
-                }
+                return;
             }
         },
     };

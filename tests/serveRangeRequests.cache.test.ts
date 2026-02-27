@@ -32,11 +32,11 @@ describe('serveRangeRequests — cache limits', () => {
     let cacheMatchSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
-        cacheMatchSpy = vi.fn().mockResolvedValue(
-            new Response(body, {
-                headers,
-            })
-        );
+        // Важно: Response.body — поток, его нельзя переиспользовать после чтения.
+        // Поэтому возвращаем новый Response на каждый вызов cache.match.
+        cacheMatchSpy = vi.fn().mockImplementation(async () => {
+            return new Response(new Uint8Array(body), { headers });
+        });
 
         const fakeCache = {
             match: cacheMatchSpy,

@@ -107,7 +107,7 @@ Options are grouped by purpose. Defaults work for most scenarios.
 
 | Option                    | Type       | Default                       | Description                                                                                                                                 |
 | ------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: fetch from network and background-restore full file to cache.                                                                |
+| `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: return `undefined` (let the next plugin / network handle the request) and start a background restore that fetches the full file into cache for subsequent requests. |
 | `assets`                  | `string[]` | —                             | List of asset URLs (precache). When set, **restore runs only for URLs in this list**. When unset, restore runs for any URL on cache miss.   |
 | `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses. Empty string to omit.                                                                                       |
 
@@ -188,7 +188,7 @@ const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the file is missing and `restoreMissingToCache` is true, the current request is served from the network (cancellable range request). A background restore fetches the full file into cache for subsequent requests **only when the URL is in the `assets` list** (if `assets` is set; otherwise restore runs for any URL).
+3. If the file is missing, the plugin returns `undefined` so the request can be handled by the next plugin / network (passthrough). If `restoreMissingToCache` is true, it also starts a background restore that fetches the full file into cache for subsequent requests **only when the URL is in the `assets` list** (if `assets` is set; otherwise restore may run for any URL).
 4. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
 5. Reads the requested byte range from the file.
 6. Caches the ready‑to‑use partial response.
