@@ -42,6 +42,11 @@ export interface RangePluginOptions {
      */
     cacheName: string;
     /**
+     * Список URL ресурсов (assets/precache). Если задан, restore запускается только для URL из этого списка.
+     * Если не задан — при промахе restore для любого URL (текущее поведение).
+     */
+    assets?: string[];
+    /**
      * Порядок выполнения плагина (по умолчанию -10, чтобы выполняться раньше основного кеширования)
      */
     order?: number;
@@ -113,12 +118,17 @@ interface RangeHandlerContext {
     restoreInProgress: Set<UrlString>;
     fileMetadataCache: Map<UrlString, FileMetadata>;
     restoreMissingToCache: boolean;
+    /** Если задан — restore только для URL из списка. */
+    assetUrls: Set<UrlString> | undefined;
     restoreOptions: RestoreOptions;
     acquireRangeSlot: (url: UrlString) => Promise<(() => void) | null>;
     mergeAbortSignals: (...s: AbortSignal[]) => AbortSignal;
     getOrCreateUrlState: (url: UrlString) => UrlState;
     prioritizeLatestRequest: boolean;
-    matchByUrl: (cache: Cache, request: Request) => Promise<Response | undefined>;
+    matchByUrl: (
+        cache: Cache,
+        request: Request
+    ) => Promise<Response | undefined>;
     invalidateCache: () => void;
 }
 
@@ -152,7 +162,10 @@ export function serveRangeRequests(
         prioritizeLatestRequest = true,
         restoreMissingToCache = true,
         maxTrackedUrls = 512,
+        assets,
     } = options;
+
+    const assetUrlsSet = assets ? new Set<UrlString>(assets) : undefined;
 
     // Кеш для range-ответов (LRU через Map)
     const rangeCache = new Map<RangeCacheKey, CachedRange>();
@@ -170,10 +183,7 @@ export function serveRangeRequests(
     });
 
     /** Базовый контекст обработчика (без restoreOptions — они зависят от event). */
-    const baseHandlerContext: Omit<
-        RangeHandlerContext,
-        'restoreOptions'
-    > = {
+    const baseHandlerContext: Omit<RangeHandlerContext, 'restoreOptions'> = {
         getCache,
         cacheName,
         enableLogging,
@@ -181,6 +191,7 @@ export function serveRangeRequests(
         restoreInProgress,
         fileMetadataCache,
         restoreMissingToCache,
+        assetUrls: assetUrlsSet,
         acquireRangeSlot,
         mergeAbortSignals,
         getOrCreateUrlState,
@@ -283,10 +294,7 @@ export function serveRangeRequests(
                   requestAbortController.signal,
                   ctx.getOrCreateUrlState(url).abortController.signal
               )
-            : ctx.mergeAbortSignals(
-                  signal,
-                  requestAbortController.signal
-              );
+            : ctx.mergeAbortSignals(signal, requestAbortController.signal);
 
         try {
             if (workSignal.aborted) return undefined;
@@ -314,7 +322,10 @@ export function serveRangeRequests(
             }
 
             if (!cachedResponse) {
-                if (ctx.restoreMissingToCache) {
+                if (
+                    ctx.restoreMissingToCache &&
+                    (!ctx.assetUrls || ctx.assetUrls.has(url))
+                ) {
                     startRestore(url, ctx.restoreOptions);
                 }
                 if (ctx.enableLogging) {
@@ -411,7 +422,7 @@ export function serveRangeRequests(
             // Проверяем кеш range-ответов (с LRU обновлением)
             const cachedRange =
                 maxCachedRanges > 0 ? getCachedRange(cacheKey) : undefined;
-                
+
             if (cachedRange) {
                 const { data, headers } = cachedRange;
                 if (enableLogging) {
@@ -479,9 +490,12 @@ export function serveRangeRequests(
                             'AbortError'
                         );
                     }
-                
-                    const fallbackResponse = await doFallbackFetch(request, fallbackOptions);
-                
+
+                    const fallbackResponse = await doFallbackFetch(
+                        request,
+                        fallbackOptions
+                    );
+
                     if (fallbackResponse.status !== 206) {
                         console.warn(
                             `[serveRangeRequests] Fallback for ${url} returned ${fallbackResponse.status} instead of 206. ` +
@@ -489,13 +503,13 @@ export function serveRangeRequests(
                                 'It must skip requests with the passthrough header (context.passthroughHeader).'
                         );
                     }
-                
+
                     if (enableLogging) {
                         console.log(
                             `serveRangeRequests plugin: fallback response for ${url} status=${fallbackResponse.status}`
                         );
                     }
-                
+
                     return fallbackResponse;
                 }
 
@@ -542,23 +556,26 @@ export function serveRangeRequests(
                         'AbortError'
                     );
                 }
-                
+
                 if (enableLogging) {
                     console.error(
                         `serveRangeRequests plugin: unexpected error for ${url}, falling back to network:`,
                         err
                     );
                 }
-                
+
                 try {
-                    const fallbackResponse = await doFallbackFetch(request, fallbackOptions);
-                
+                    const fallbackResponse = await doFallbackFetch(
+                        request,
+                        fallbackOptions
+                    );
+
                     if (enableLogging) {
                         console.log(
                             `serveRangeRequests plugin: fallback (after error) response for ${url} status=${fallbackResponse.status}`
                         );
                     }
-                
+
                     return fallbackResponse;
                 } catch (fetchErr) {
                     throw fetchErr;
