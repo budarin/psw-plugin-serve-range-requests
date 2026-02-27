@@ -105,10 +105,11 @@ Options are grouped by purpose. Defaults work for most scenarios.
 
 ### Restore and delivery
 
-| Option                    | Type      | Default                       | Description                                                                 |
-| ------------------------- | --------- | ----------------------------- | --------------------------------------------------------------------------- |
-| `restoreMissingToCache`   | `boolean` | `true`                        | On cache miss: fetch from network and background-restore full file to cache. |
-| `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses. Empty string to omit.                       |
+| Option                    | Type       | Default                       | Description                                                                                                                                 |
+| ------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: fetch from network and background-restore full file to cache.                                                                |
+| `assets`                  | `string[]` | —                             | List of asset URLs (precache). When set, **restore runs only for URLs in this list**. When unset, restore runs for any URL on cache miss.   |
+| `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses. Empty string to omit.                                                                                       |
 
 ### Debug
 
@@ -187,7 +188,7 @@ const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the file is missing and `restoreMissingToCache` is true, the current request is served from the network (cancellable range request); a background restore fetches the full file into cache for subsequent requests.
+3. If the file is missing and `restoreMissingToCache` is true, the current request is served from the network (cancellable range request). A background restore fetches the full file into cache for subsequent requests **only when the URL is in the `assets` list** (if `assets` is set; otherwise restore runs for any URL).
 4. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
 5. Reads the requested byte range from the file.
 6. Caches the ready‑to‑use partial response.

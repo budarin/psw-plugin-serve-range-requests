@@ -390,16 +390,20 @@ export function serveRangeRequests(
             if (!rangeHeader) {
                 return;
             }
+
             if (request.method !== 'GET') {
                 return;
             }
+
             const signal = request.signal;
+
             if (signal.aborted) {
                 if (enableLogging) {
                     console.log(
                         `serveRangeRequests plugin: abort handling for ${request.url} (signal already aborted)`
                     );
                 }
+
                 throw new DOMException(
                     'The operation was aborted.',
                     'AbortError'
@@ -413,6 +417,7 @@ export function serveRangeRequests(
                         `serveRangeRequests plugin: skipping ${request.url} (filtered out by include/exclude rules)`
                     );
                 }
+
                 return;
             }
 
@@ -425,6 +430,7 @@ export function serveRangeRequests(
 
             if (cachedRange) {
                 const { data, headers } = cachedRange;
+
                 if (enableLogging) {
                     console.log(
                         `serveRangeRequests plugin: returning 206 from range cache for ${url} data.byteLength=${data.byteLength}`
