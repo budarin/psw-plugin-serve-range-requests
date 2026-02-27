@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.28] - 2026-02-27
+
+### Changed
+
+- **Documentation**: Clarified the English and Russian README about caching large media files without Range support, potential memory issues on low-end devices, and playback/seek limitations. No changes to the public API or runtime behavior.
+
 ## [1.0.27] - 2026-02-27
 
 ### Changed

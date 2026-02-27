@@ -4,6 +4,8 @@
 
 Service Worker plugin for [@budarin/pluggable-serviceworker](https://www.npmjs.com/package/@budarin/pluggable-serviceworker) that serves HTTP Range requests for cached files.
 
+If you cache media without serving Range requests, the browser has to load the whole file into memory and play it from start to finish. There is no way to seek to a different position, and for large files the memory footprint can be huge. On low-end or memory-constrained devices that often means stuttering, failed playback, or even crashes. This plugin adds proper Range support for cached content: only the requested byte ranges are read and sent, so playback can seek freely and memory use stays under control.
+
 [![CI](https://github.com/budarin/psw-plugin-serve-range-requests/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/budarin/psw-plugin-serve-range-requests/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@budarin/psw-plugin-serve-range-requests?color=cb0000)](https://www.npmjs.com/package/@budarin/psw-plugin-serve-range-requests)
 [![npm](https://img.shields.io/npm/dt/@budarin/psw-plugin-serve-range-requests)](https://www.npmjs.com/package/@budarin/psw-plugin-serve-range-requests)
