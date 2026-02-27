@@ -24,6 +24,7 @@ export const VIDEO_PRESET = {
     maxCachedRanges: 0,
     maxConcurrentRangesPerUrl: 1,
     prioritizeLatestRequest: true,
+    rangeResponseCacheControl: undefined,
 } as const;
 
 /**
@@ -36,6 +37,7 @@ export const AUDIO_PRESET = {
     maxCachedRanges: 0,
     maxConcurrentRangesPerUrl: 1,
     prioritizeLatestRequest: true,
+    rangeResponseCacheControl: undefined,
 } as const;
 
 /**
@@ -47,6 +49,7 @@ export const MAPS_PRESET = {
     maxCacheableRangeSize: 2 * 1024 * 1024, // 2MB
     maxCachedRanges: 1000,
     prioritizeLatestRequest: false,
+    rangeResponseCacheControl: 'max-age=31536000, immutable',
 } as const;
 
 /**
@@ -58,6 +61,7 @@ export const DOCS_PRESET = {
     maxCacheableRangeSize: 5 * 1024 * 1024, // 5MB
     maxCachedRanges: 150,
     prioritizeLatestRequest: false,
+    rangeResponseCacheControl: 'max-age=31536000, immutable',
 } as const;
 
 /**
