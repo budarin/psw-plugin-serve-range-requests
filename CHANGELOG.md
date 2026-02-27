@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.27] - 2026-02-27
+
+### Changed
+
+- **Compatibility**: Updated devDependency `@budarin/pluggable-serviceworker` to `^1.17.1`. No changes in the public API or runtime behavior of the plugin.
+
 ## [1.0.26] - 2026-02-27
 
 ### Added
