@@ -5,10 +5,7 @@ import type {
 } from '@budarin/pluggable-serviceworker';
 import { matchByUrl } from '@budarin/pluggable-serviceworker/utils';
 
-import {
-    HEADER_CONTENT_LENGTH,
-    HEADER_RANGE,
-} from '@budarin/http-constants/headers';
+import { HEADER_RANGE } from '@budarin/http-constants/headers';
 import { HTTP_STATUS_PARTIAL_CONTENT } from '@budarin/http-constants/statuses';
 
 import type {
@@ -17,15 +14,17 @@ import type {
     RangeCacheKey,
     UrlString,
 } from './types.js';
+import { doFallbackFetch } from './fallback.js';
 import {
-    buildRangeResponseHeaders,
-    extractMetadataFromResponse,
-} from './rangeResponse.js';
+    createRangeSlotManager,
+    mergeAbortSignals,
+    type UrlState,
+} from './rangeSlot.js';
+import { startRestore, type RestoreOptions } from './restore.js';
+import { serveRangeFromCachedResponse } from './serveFromCache.js';
 import {
     type Range,
-    createRangeStream,
-    ifRangeMatches,
-    parseRangeHeader,
+    shouldCacheRange,
     shouldProcessFile,
 } from './rangeUtils.js';
 
@@ -105,6 +104,32 @@ export interface RangePluginOptions {
     maxTrackedUrls?: number;
 }
 
+/** Контекст для шагов обработчика: полный кэш, семафор, restore, инвалидация. */
+interface RangeHandlerContext {
+    getCache: () => Promise<Cache>;
+    cacheName: string;
+    enableLogging: boolean;
+    rangeResponseCacheControl: string | undefined;
+    restoreInProgress: Set<UrlString>;
+    fileMetadataCache: Map<UrlString, FileMetadata>;
+    restoreMissingToCache: boolean;
+    restoreOptions: RestoreOptions;
+    acquireRangeSlot: (url: UrlString) => Promise<(() => void) | null>;
+    mergeAbortSignals: (...s: AbortSignal[]) => AbortSignal;
+    getOrCreateUrlState: (url: UrlString) => UrlState;
+    prioritizeLatestRequest: boolean;
+    matchByUrl: (cache: Cache, request: Request) => Promise<Response | undefined>;
+    invalidateCache: () => void;
+}
+
+/** Результат успешной попытки ответа из полного кэша. */
+interface TryFullCacheResult {
+    stream: ReadableStream<Uint8Array>;
+    headers: Headers;
+    range: Range;
+    metadata: FileMetadata;
+}
+
 /**
  * Плагин для обработки HTTP Range запросов: отдаёт частичное содержимое файлов из кеша SW.
  *
@@ -118,6 +143,7 @@ export function serveRangeRequests(
         cacheName,
         order = -10,
         maxCachedRanges = 100,
+        maxCacheableRangeSize = 10 * 1024 * 1024, // 10MB
         enableLogging = false,
         include,
         exclude,
@@ -136,103 +162,34 @@ export function serveRangeRequests(
     let cacheInstance: Cache | null = null;
     /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
     const restoreInProgress = new Set<UrlString>();
-    /** Единственный ожидающий слот. При новом запросе предыдущий отменяется через resolve(null). */
-    interface NextWaiter {
-        resolve: (release: (() => void) | null) => void;
-        wake: () => void;
-    }
 
-    type UrlState = {
-        count: number;
-        nextWaiter: NextWaiter | null;
-        abortController: AbortController;
+    const { acquireRangeSlot, getOrCreateUrlState } = createRangeSlotManager({
+        maxConcurrentRangesPerUrl,
+        prioritizeLatestRequest,
+        maxTrackedUrls,
+    });
+
+    /** Базовый контекст обработчика (без restoreOptions — они зависят от event). */
+    const baseHandlerContext: Omit<
+        RangeHandlerContext,
+        'restoreOptions'
+    > = {
+        getCache,
+        cacheName,
+        enableLogging,
+        rangeResponseCacheControl,
+        restoreInProgress,
+        fileMetadataCache,
+        restoreMissingToCache,
+        acquireRangeSlot,
+        mergeAbortSignals,
+        getOrCreateUrlState,
+        prioritizeLatestRequest,
+        matchByUrl,
+        invalidateCache: () => {
+            cacheInstance = null;
+        },
     };
-    let urlSemaphore: Map<UrlString, UrlState> | null = null;
-    /** Лимит записей по URL (семафор) — из maxTrackedUrls; при 0 лимит не применяется. */
-    const maxUrlStates = maxTrackedUrls;
-
-    function getOrCreateUrlState(url: UrlString): UrlState {
-        if (!urlSemaphore) {
-            urlSemaphore = new Map();
-        }
-        let state = urlSemaphore.get(url);
-        if (!state) {
-            if (maxUrlStates > 0 && urlSemaphore.size >= maxUrlStates) {
-                for (const [key, s] of urlSemaphore) {
-                    if (s.count === 0 && !s.nextWaiter) {
-                        urlSemaphore.delete(key);
-                        break;
-                    }
-                }
-            }
-            state = {
-                count: 0,
-                nextWaiter: null,
-                abortController: new AbortController(),
-            };
-            urlSemaphore.set(url, state);
-        }
-        return state;
-    }
-
-    /**
-     * Объединяет несколько AbortSignal — при отмене любого работа останавливается.
-     */
-    function mergeAbortSignals(...signals: AbortSignal[]): AbortSignal {
-        const aborted = signals.find((s) => s.aborted);
-        if (aborted) {
-            return aborted;
-        }
-        if (typeof AbortSignal.any === 'function') {
-            return AbortSignal.any(signals);
-        }
-        const ac = new AbortController();
-        const abort = () => ac.abort();
-        for (const s of signals) {
-            s.addEventListener('abort', abort, { once: true });
-        }
-        return ac.signal;
-    }
-
-    function acquireRangeSlot(url: UrlString): Promise<(() => void) | null> {
-        if (!prioritizeLatestRequest) {
-            return Promise.resolve(() => {});
-        }
-
-        const state = getOrCreateUrlState(url);
-
-        return new Promise<(() => void) | null>((resolve) => {
-            const release = () => {
-                state.count--;
-                const waiter = state.nextWaiter;
-                state.nextWaiter = null;
-                if (waiter) {
-                    waiter.wake();
-                }
-            };
-
-            const wake = () => {
-                state.count++;
-                resolve(release);
-            };
-
-            if (state.count < maxConcurrentRangesPerUrl) {
-                state.count++;
-                resolve(release);
-                return;
-            }
-
-            state.abortController.abort();
-            state.abortController = new AbortController();
-            const prev = state.nextWaiter;
-            state.nextWaiter = null;
-            if (prev) {
-                prev.resolve(null);
-            }
-
-            state.nextWaiter = { resolve, wake };
-        });
-    }
 
     /**
      * Получает кеш инстанс (с кешированием). При ошибке сбрасывает cacheInstance.
@@ -250,7 +207,8 @@ export function serveRangeRequests(
     }
 
     /**
-     * Управляет размером кеша метаданных (LRU стратегия). Лимит = maxCachedRanges.
+     * Ограничивает размер кеша метаданных: вытесняется запись, вставленная раньше всех (FIFO).
+     * Лимит = maxCachedRanges.
      */
     function manageMetadataCacheSize(): void {
         if (maxCachedRanges <= 0) {
@@ -280,6 +238,126 @@ export function serveRangeRequests(
             rangeCache.set(cacheKey, cached);
         }
         return cached;
+    }
+
+    /**
+     * Освобождает место в rangeCache при достижении лимита (FIFO — вытесняется самый старый).
+     */
+    function evictOneRangeCacheEntry(): void {
+        if (maxCachedRanges <= 0 || rangeCache.size < maxCachedRanges) {
+            return;
+        }
+        const firstKey = rangeCache.keys().next().value;
+        if (firstKey) {
+            rangeCache.delete(firstKey);
+            if (enableLogging) {
+                console.log(
+                    `Range cache: evicted ${firstKey} (limit ${maxCachedRanges})`
+                );
+            }
+        }
+    }
+
+    /**
+     * Пытается отдать диапазон из закешированного полного файла: слот, matchByUrl, restore при промахе, serveRangeFromCachedResponse.
+     * Возвращает undefined при отмене, промахе кэша или ошибке.
+     */
+    async function tryServeRangeFromCachedFile(
+        request: Request,
+        url: UrlString,
+        rangeHeader: string,
+        signal: AbortSignal,
+        requestAbortController: AbortController,
+        abortPromise: Promise<undefined>,
+        ctx: RangeHandlerContext
+    ): Promise<TryFullCacheResult | undefined> {
+        const release = await Promise.race([
+            ctx.acquireRangeSlot(url),
+            abortPromise.then(() => undefined),
+        ]);
+        if (!release) return undefined;
+
+        const workSignal = ctx.prioritizeLatestRequest
+            ? ctx.mergeAbortSignals(
+                  signal,
+                  requestAbortController.signal,
+                  ctx.getOrCreateUrlState(url).abortController.signal
+              )
+            : ctx.mergeAbortSignals(
+                  signal,
+                  requestAbortController.signal
+              );
+
+        try {
+            if (workSignal.aborted) return undefined;
+
+            const cache = await ctx.getCache();
+            if (workSignal.aborted) return undefined;
+
+            let cachedResponse: Response | undefined;
+            try {
+                cachedResponse = await ctx.matchByUrl(cache, request);
+            } catch (matchError) {
+                ctx.invalidateCache();
+                if (ctx.enableLogging) {
+                    console.error(
+                        'serveRangeRequests plugin: matchByUrl failed',
+                        matchError
+                    );
+                }
+                return undefined;
+            }
+            if (ctx.enableLogging) {
+                console.log(
+                    `serveRangeRequests plugin: matchByUrl cacheName=${ctx.cacheName} request.url=${request.url} result=${cachedResponse ? 'found' : 'null'}`
+                );
+            }
+
+            if (!cachedResponse) {
+                if (ctx.restoreMissingToCache) {
+                    startRestore(url, ctx.restoreOptions);
+                }
+                if (ctx.enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: skipping ${url} (file not in cache)`
+                    );
+                }
+                return undefined;
+            }
+            if (workSignal.aborted) return undefined;
+
+            return serveRangeFromCachedResponse(
+                cachedResponse,
+                request,
+                rangeHeader,
+                workSignal,
+                {
+                    url,
+                    rangeResponseCacheControl: ctx.rangeResponseCacheControl,
+                    enableLogging: ctx.enableLogging,
+                    fileMetadataCache: ctx.fileMetadataCache,
+                }
+            );
+        } catch (error) {
+            const isAbort =
+                (error instanceof Error &&
+                    error.message === 'Request aborted') ||
+                (typeof DOMException !== 'undefined' &&
+                    error instanceof DOMException &&
+                    error.name === 'AbortError');
+            if (!isAbort) {
+                ctx.invalidateCache();
+            }
+            if (!isAbort && ctx.enableLogging) {
+                console.error(
+                    `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
+                    error
+                );
+            }
+            return undefined;
+        } finally {
+            release();
+        }
     }
 
     return {
@@ -333,6 +411,7 @@ export function serveRangeRequests(
             // Проверяем кеш range-ответов (с LRU обновлением)
             const cachedRange =
                 maxCachedRanges > 0 ? getCachedRange(cacheKey) : undefined;
+                
             if (cachedRange) {
                 const { data, headers } = cachedRange;
                 if (enableLogging) {
@@ -340,35 +419,31 @@ export function serveRangeRequests(
                         `serveRangeRequests plugin: returning 206 from range cache for ${url} data.byteLength=${data.byteLength}`
                     );
                 }
+
                 return new Response(data, {
                     headers,
                     status: HTTP_STATUS_PARTIAL_CONTENT,
                 });
             }
 
-            const doFallbackFetch = (): Promise<Response> => {
-                // Передаём заголовки как объект. Обязательно mode: 'cors': при mode no-cors (напр. от <video>)
-                // браузер оставляет только CORS-safelisted заголовки — Range и X-PSW-Passthrough снимаются.
-                // Range задаём явно из уже распарсенного rangeHeader, чтобы fallback всегда шёл за диапазоном.
-                const headerRecord: Record<string, string> = {
-                    ...Object.fromEntries(request.headers.entries()),
-                    [passthroughHeader]: '1',
-                    [HEADER_RANGE]: rangeHeader,
-                };
-                const fallbackRequest = new Request(request.url, {
-                    method: request.method,
-                    mode: 'cors',
-                    credentials: request.credentials,
-                    headers: headerRecord,
-                    signal: request.signal,
-                });
-                if (enableLogging) {
-                    const keys = [...fallbackRequest.headers.keys()];
-                    console.log(
-                        `serveRangeRequests plugin: fallback fetch for ${url}, passthroughHeader: '${String(passthroughHeader)}', has passthrough: ${passthroughHeader ? fallbackRequest.headers.has(passthroughHeader) : false}, request header keys: ${keys.join(', ')}`
-                    );
-                }
-                return context.fetchPassthrough(fallbackRequest);
+            const fallbackOptions = {
+                url,
+                rangeHeader,
+                passthroughHeader,
+                fetchPassthrough: context.fetchPassthrough,
+                enableLogging,
+            };
+
+            const handlerContext: RangeHandlerContext = {
+                ...baseHandlerContext,
+                restoreOptions: {
+                    getCache,
+                    passthroughHeader,
+                    fetchPassthrough: context.fetchPassthrough,
+                    enableLogging,
+                    cacheName,
+                    restoreInProgress,
+                },
             };
 
             try {
@@ -384,224 +459,19 @@ export function serveRangeRequests(
                     );
                 });
 
-                const workPromise = (async (): Promise<
-                    | {
-                          stream: ReadableStream<Uint8Array>;
-                          headers: Headers;
-                          range: Range;
-                          metadata: FileMetadata;
-                      }
-                    | undefined
-                > => {
-                    const release = await Promise.race([
-                        acquireRangeSlot(url),
-                        abortPromise.then(() => undefined),
-                    ]);
-                    if (!release) return undefined;
+                const result = await Promise.race([
+                    tryServeRangeFromCachedFile(
+                        request,
+                        url,
+                        rangeHeader,
+                        signal,
+                        requestAbortController,
+                        abortPromise,
+                        handlerContext
+                    ),
+                    abortPromise,
+                ]);
 
-                    const workSignal = prioritizeLatestRequest
-                        ? mergeAbortSignals(
-                              signal,
-                              requestAbortController.signal,
-                              getOrCreateUrlState(url).abortController.signal
-                          )
-                        : mergeAbortSignals(
-                              signal,
-                              requestAbortController.signal
-                          );
-
-                    try {
-                        if (workSignal.aborted) return undefined;
-
-                        const cache = await getCache();
-                        if (workSignal.aborted) return undefined;
-
-                        let cachedResponse: Response | undefined;
-                        try {
-                            cachedResponse = await matchByUrl(cache, request);
-                        } catch (matchError) {
-                            cacheInstance = null;
-                            if (enableLogging) {
-                                console.error(
-                                    'serveRangeRequests plugin: matchByUrl failed',
-                                    matchError
-                                );
-                            }
-                            return undefined;
-                        }
-                        if (enableLogging) {
-                            console.log(
-                                `serveRangeRequests plugin: matchByUrl cacheName=${cacheName} request.url=${request.url} result=${cachedResponse ? 'found' : 'null'}`
-                            );
-                        }
-
-                        if (!cachedResponse) {
-                            if (
-                                restoreMissingToCache &&
-                                !restoreInProgress.has(url)
-                            ) {
-                                const runRestore = (): void => {
-                                    restoreInProgress.add(url);
-                                    void (async (): Promise<void> => {
-                                        try {
-                                            const c = await getCache();
-                                            if (
-                                                await matchByUrl(
-                                                    c,
-                                                    new Request(url)
-                                                )
-                                            ) {
-                                                if (enableLogging) {
-                                                    console.log(
-                                                        `serveRangeRequests plugin: restore skipped for ${url} (already in cache)`
-                                                    );
-                                                }
-                                                return;
-                                            }
-                                            const fullRequest = new Request(
-                                                url,
-                                                {
-                                                    method: 'GET',
-                                                    headers: {
-                                                        [passthroughHeader]:
-                                                            '1',
-                                                    },
-                                                }
-                                            );
-                                            if (enableLogging) {
-                                                console.log(
-                                                    `serveRangeRequests plugin: restore fetch for ${url} (full file, no Range)`
-                                                );
-                                            }
-                                            const response =
-                                                await context.fetchPassthrough(fullRequest);
-                                            if (response.ok) {
-                                                await c.put(
-                                                    fullRequest,
-                                                    response
-                                                );
-                                                if (enableLogging) {
-                                                    console.log(
-                                                        `serveRangeRequests plugin: cache put done for ${url} cacheName=${cacheName}`
-                                                    );
-                                                }
-                                            }
-                                        } catch {
-                                            // Игнорируем ошибки restore — следующий запрос попробует снова
-                                        } finally {
-                                            restoreInProgress.delete(url);
-                                            if (enableLogging) {
-                                                console.log(
-                                                    `serveRangeRequests plugin: restore finished for ${url}`
-                                                );
-                                            }
-                                        }
-                                    })();
-                                };
-
-                                runRestore();
-                            }
-                            // При промахе не ждём restore: текущий запрос идёт в сеть (fallback),
-                            // restore заполняет кэш для следующих запросов.
-                            if (!cachedResponse) {
-                                if (enableLogging) {
-                                    console.log(
-                                        `serveRangeRequests plugin: skipping ${url} (file not in cache)`
-                                    );
-                                }
-                                return undefined;
-                            }
-                        }
-                        if (workSignal.aborted) return undefined;
-
-                        let metadata = fileMetadataCache.get(url);
-                        if (metadata) {
-                            const contentLength = cachedResponse.headers.get(
-                                HEADER_CONTENT_LENGTH
-                            );
-                            if (contentLength !== String(metadata.size)) {
-                                metadata = undefined;
-                            }
-                        }
-                        if (!metadata) {
-                            metadata =
-                                extractMetadataFromResponse(cachedResponse);
-                        }
-                        if (!metadata) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (no valid metadata)`
-                                );
-                            }
-                            return undefined;
-                        }
-
-                        const ifRangeHeader = request.headers.get('If-Range');
-                        if (
-                            ifRangeHeader &&
-                            !ifRangeMatches(ifRangeHeader, metadata)
-                        ) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (If-Range does not match)`
-                                );
-                            }
-                            return undefined;
-                        }
-
-                        const range = parseRangeHeader(
-                            rangeHeader,
-                            metadata.size
-                        );
-
-                        if (!cachedResponse.body) {
-                            if (enableLogging) {
-                                console.log(
-                                    `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
-                                );
-                            }
-                            return undefined;
-                        }
-                        if (workSignal.aborted) return undefined;
-
-                        const rangeSize = range.end - range.start + 1;
-                        const stream = createRangeStream(
-                            cachedResponse.body,
-                            range,
-                            workSignal
-                        );
-
-                        const headers = buildRangeResponseHeaders(
-                            range,
-                            metadata,
-                            rangeSize,
-                            rangeResponseCacheControl
-                        );
-
-                        return { stream, headers, range, metadata };
-                    } catch (error) {
-                        const isAbort =
-                            (error instanceof Error &&
-                                error.message === 'Request aborted') ||
-                            (typeof DOMException !== 'undefined' &&
-                                error instanceof DOMException &&
-                                error.name === 'AbortError');
-                        if (!isAbort) {
-                            cacheInstance = null;
-                        }
-                        if (!isAbort && enableLogging) {
-                            console.error(
-                                `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
-                                error
-                            );
-                        }
-                        return undefined;
-                    } finally {
-                        release();
-                    }
-                })();
-
-                const result = await Promise.race([workPromise, abortPromise]);
                 if (!result) {
                     if (signal.aborted) {
                         throw new DOMException(
@@ -609,7 +479,9 @@ export function serveRangeRequests(
                             'AbortError'
                         );
                     }
-                    const fallbackResponse = await doFallbackFetch();
+                
+                    const fallbackResponse = await doFallbackFetch(request, fallbackOptions);
+                
                     if (fallbackResponse.status !== 206) {
                         console.warn(
                             `[serveRangeRequests] Fallback for ${url} returned ${fallbackResponse.status} instead of 206. ` +
@@ -617,11 +489,13 @@ export function serveRangeRequests(
                                 'It must skip requests with the passthrough header (context.passthroughHeader).'
                         );
                     }
+                
                     if (enableLogging) {
                         console.log(
                             `serveRangeRequests plugin: fallback response for ${url} status=${fallbackResponse.status}`
                         );
                     }
+                
                     return fallbackResponse;
                 }
 
@@ -630,6 +504,25 @@ export function serveRangeRequests(
 
                 manageMetadataCacheSize();
                 fileMetadataCache.set(url, result.metadata);
+
+                const shouldCache =
+                    maxCachedRanges > 0 &&
+                    shouldCacheRange(range, maxCacheableRangeSize);
+
+                if (shouldCache) {
+                    evictOneRangeCacheEntry();
+                    const data = await new Response(stream).arrayBuffer();
+                    rangeCache.set(cacheKey, { data, headers });
+                    if (enableLogging) {
+                        console.log(
+                            `serveRangeRequests plugin: returning 206 for ${url} range size: ${rangeSize} bytes (cached)`
+                        );
+                    }
+                    return new Response(data, {
+                        status: HTTP_STATUS_PARTIAL_CONTENT,
+                        headers,
+                    });
+                }
 
                 if (enableLogging) {
                     console.log(
@@ -649,19 +542,23 @@ export function serveRangeRequests(
                         'AbortError'
                     );
                 }
+                
                 if (enableLogging) {
                     console.error(
                         `serveRangeRequests plugin: unexpected error for ${url}, falling back to network:`,
                         err
                     );
                 }
+                
                 try {
-                    const fallbackResponse = await doFallbackFetch();
+                    const fallbackResponse = await doFallbackFetch(request, fallbackOptions);
+                
                     if (enableLogging) {
                         console.log(
                             `serveRangeRequests plugin: fallback (after error) response for ${url} status=${fallbackResponse.status}`
                         );
                     }
+                
                     return fallbackResponse;
                 } catch (fetchErr) {
                     throw fetchErr;

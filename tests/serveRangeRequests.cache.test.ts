@@ -64,7 +64,11 @@ describe('serveRangeRequests — cache limits', () => {
             })
         );
 
-        const context = { logger, passthroughHeader: PSW_PASSTHROUGH_HEADER };
+        const context = {
+            logger,
+            passthroughHeader: PSW_PASSTHROUGH_HEADER,
+            fetchPassthrough: (r: Request) => fetch(r),
+        };
         const first = await plugin.fetch?.(fetchEvent, context);
         const second = await plugin.fetch?.(fetchEvent, context);
 
@@ -89,7 +93,11 @@ describe('serveRangeRequests — cache limits', () => {
             })
         );
 
-        const context = { logger, passthroughHeader: PSW_PASSTHROUGH_HEADER };
+        const context = {
+            logger,
+            passthroughHeader: PSW_PASSTHROUGH_HEADER,
+            fetchPassthrough: (r: Request) => fetch(r),
+        };
         const first = await plugin.fetch?.(fetchEvent, context);
         const second = await plugin.fetch?.(fetchEvent, context);
 
