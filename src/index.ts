@@ -377,7 +377,7 @@ export function serveRangeRequests(
         async fetch(event: FetchEvent, context: PluginContext): FetchResponse {
             const request = event.request;
             // Имя заголовка passthrough приходит из контекста фреймворка
-            const passthroughHeader = context.passthroughHeader!;
+            const passthroughHeader = context.passthroughHeader;
 
             // Не обрабатываем свои же внутренние запросы (fallback и restore) — пусть уходят в сеть
             if (request.headers.get(passthroughHeader)) {
