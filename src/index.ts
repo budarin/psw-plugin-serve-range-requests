@@ -421,11 +421,12 @@ export function serveRangeRequests(
             }
 
             const url: UrlString = request.url;
-            const cacheKey: RangeCacheKey = `${url}|${rangeHeader}`;
+            const cacheKey: RangeCacheKey | undefined =
+                maxCachedRanges > 0 ? `${url}|${rangeHeader}` : undefined;
 
-            // Проверяем кеш range-ответов (с LRU обновлением)
+            // Проверяем кеш range-ответов (с LRU обновлением) только при включённом кеше
             const cachedRange =
-                maxCachedRanges > 0 ? getCachedRange(cacheKey) : undefined;
+                cacheKey !== undefined ? getCachedRange(cacheKey) : undefined;
 
             if (cachedRange) {
                 const { data, headers } = cachedRange;
@@ -500,7 +501,7 @@ export function serveRangeRequests(
                     maxCachedRanges > 0 &&
                     shouldCacheRange(range, maxCacheableRangeSize);
 
-                if (shouldCache) {
+                if (shouldCache && cacheKey !== undefined) {
                     evictOneRangeCacheEntry();
                     const data = await new Response(stream).arrayBuffer();
                     rangeCache.set(cacheKey, { data, headers });

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.29] - 2026-03-02
+
+### Changed
+
+- **Performance**: In the fetch handler, `cacheKey` is built and range cache is consulted only when `maxCachedRanges > 0`, avoiding unnecessary work when range caching is disabled.
+
+### Removed
+
+- **Dead code**: Removed unused `readRangeFromStream` from `rangeUtils.ts`; range responses use `createRangeStream` only.
+
 ## [1.0.28] - 2026-02-27
 
 ### Changed
