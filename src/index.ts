@@ -41,8 +41,9 @@ export interface RangePluginOptions {
      */
     cacheName: string;
     /**
-     * Список URL ресурсов (assets/precache). Если задан, restore запускается только для URL из этого списка.
-     * Если не задан — при промахе restore для любого URL (текущее поведение).
+     * Список pathname'ов ресурсов (assets/precache). Исключительно pathname'ы (например `/assets/Meeting.mp4`),
+     * не полные URL — при сборке origin неизвестен. Если задан, restore при промахе запускается только для запросов,
+     * чей pathname есть в списке. Если не задан — restore для любого обработанного URL.
      */
     assets?: string[];
     /**
@@ -117,7 +118,7 @@ interface RangeHandlerContext {
     restoreInProgress: Set<UrlString>;
     fileMetadataCache: Map<UrlString, FileMetadata>;
     restoreMissingToCache: boolean;
-    /** Если задан — restore только для URL из списка. */
+    /** Если задан — restore только для запросов, чей pathname есть в списке (в Set — pathname'ы). */
     assetUrls: Set<UrlString> | undefined;
     restoreOptions: RestoreOptions;
     acquireRangeSlot: (url: UrlString) => Promise<(() => void) | null>;
@@ -321,10 +322,15 @@ export function serveRangeRequests(
             }
 
             if (!cachedResponse) {
-                if (
-                    ctx.restoreMissingToCache &&
-                    (!ctx.assetUrls || ctx.assetUrls.has(url))
-                ) {
+                let urlInAssets = !ctx.assetUrls;
+                if (ctx.assetUrls) {
+                    try {
+                        urlInAssets = ctx.assetUrls.has(new URL(url).pathname);
+                    } catch {
+                        urlInAssets = false;
+                    }
+                }
+                if (ctx.restoreMissingToCache && urlInAssets) {
                     startRestore(url, ctx.restoreOptions);
                 }
                 if (ctx.enableLogging) {

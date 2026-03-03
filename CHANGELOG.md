@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.30] - 2026-03-03
+
+### Fixed
+
+- **Restore on cache miss**: When `assets` is set, the plugin now correctly treats it as pathnames (e.g. `/assets/Meeting.mp4`) and compares the request URL via `new URL(url).pathname`. Previously it compared the full request URL, so restore never ran when assets contained pathnames. Origin is unknown at build time, so assets are pathnames only.
+
+### Changed
+
+- **Documentation**: JSDoc, README, and reference.mdc now state explicitly that `assets` must be pathnames only, not full URLs.
+- **Internals**: Restore-on-miss check uses pathname comparison; `RangeHandlerContext.assetUrls` comment clarified.
+
 ## [1.0.29] - 2026-03-02
 
 ### Changed
