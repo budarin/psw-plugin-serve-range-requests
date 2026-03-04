@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.33] - 2026-03-06
+
+### Performance
+
+- When a request holding the slot is aborted (e.g. new range request during seek), it exits immediately via `Promise.race(matchByUrl, workSignal abort)` instead of waiting for matchByUrl to complete. Cancelled requests no longer block for hundreds of ms.
+
 ## [1.0.32] - 2026-03-05
 
 ### Added

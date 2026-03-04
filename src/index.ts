@@ -326,8 +326,29 @@ export function serveRangeRequests(
 
             let cachedResponse: Response | undefined;
             try {
-                cachedResponse = await ctx.matchByUrl(cache, request);
+                cachedResponse = await Promise.race([
+                    ctx.matchByUrl(cache, request),
+                    new Promise<never>((_, reject) => {
+                        workSignal.addEventListener(
+                            'abort',
+                            () =>
+                                reject(
+                                    new DOMException(
+                                        'Aborted',
+                                        'AbortError'
+                                    )
+                                ),
+                            { once: true }
+                        );
+                    }),
+                ]);
             } catch (matchError) {
+                if (
+                    matchError instanceof DOMException &&
+                    matchError.name === 'AbortError'
+                ) {
+                    return undefined;
+                }
                 ctx.invalidateCache();
                 if (ctx.enableLogging) {
                     console.error(
