@@ -157,17 +157,26 @@ export function shouldProcessFile(
     return true;
 }
 
+export interface CreateRangeStreamOptions {
+    enableLogging?: boolean;
+    url?: string;
+}
+
 /**
  * Создаёт ReadableStream, отдающий только указанный диапазон байтов из исходного потока.
  * Используется для отдачи 206 без загрузки всего диапазона в память.
+ * При abort/ошибке чтения стрим завершается через close(), а не error(), чтобы не вызывать
+ * PIPELINE_ERROR_READ у медиа-плеера (FFmpegDemuxer: data source error).
  */
 export function createRangeStream(
     sourceStream: ReadableStream<Uint8Array>,
     range: Range,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: CreateRangeStreamOptions
 ): ReadableStream<Uint8Array> {
     const reader = sourceStream.getReader();
     let position = 0;
+    const { enableLogging = false, url = '' } = options ?? {};
 
     if (signal) {
         signal.addEventListener(
@@ -184,22 +193,34 @@ export function createRangeStream(
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             while (true) {
                 if (signal?.aborted) {
-                    controller.error(new Error('Request aborted'));
+                    if (enableLogging && url) {
+                        console.log(
+                            `serveRangeRequests plugin: range stream closed (abort) for ${url} bytes ${range.start}-${range.end}`
+                        );
+                    }
+                    controller.close();
                     return;
                 }
                 let chunk: ReadableStreamReadResult<Uint8Array>;
                 try {
                     chunk = await reader.read();
                 } catch (readError) {
-                    if (signal?.aborted) {
-                        controller.error(new Error('Request aborted'));
-                    } else {
-                        controller.error(readError);
+                    if (enableLogging && url) {
+                        console.warn(
+                            `serveRangeRequests plugin: range stream closed (read error) for ${url} bytes ${range.start}-${range.end}:`,
+                            readError
+                        );
                     }
+                    controller.close();
                     return;
                 }
                 const { done, value } = chunk;
                 if (done) {
+                    if (enableLogging && url) {
+                        console.log(
+                            `serveRangeRequests plugin: range stream finished (source done) for ${url} bytes ${range.start}-${range.end}`
+                        );
+                    }
                     controller.close();
                     return;
                 }
@@ -211,6 +232,11 @@ export function createRangeStream(
                     continue;
                 }
                 if (chunkStart > range.end) {
+                    if (enableLogging && url) {
+                        console.log(
+                            `serveRangeRequests plugin: range stream finished (range complete) for ${url} bytes ${range.start}-${range.end}`
+                        );
+                    }
                     controller.close();
                     return;
                 }
@@ -224,6 +250,11 @@ export function createRangeStream(
             }
         },
         cancel(): void {
+            if (enableLogging && url) {
+                console.log(
+                    `serveRangeRequests plugin: range stream cancelled (consumer cancelled) for ${url} bytes ${range.start}-${range.end}`
+                );
+            }
             reader.cancel().catch(() => {});
         },
     });

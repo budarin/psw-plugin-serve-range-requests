@@ -29,6 +29,12 @@ export function buildRangeResponseHeaders(
         [HEADER_CONTENT_LENGTH]: String(dataByteLength),
         [HEADER_CONTENT_TYPE]: metadata.type,
     });
+    if (metadata.etag) {
+        headers.set(HEADER_ETAG, metadata.etag);
+    }
+    if (metadata.lastModified) {
+        headers.set(HEADER_LAST_MODIFIED, metadata.lastModified);
+    }
     if (cacheControl) {
         headers.set(HEADER_CACHE_CONTROL, cacheControl);
     }

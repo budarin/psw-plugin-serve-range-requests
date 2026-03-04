@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.31] - 2026-03-04
+
+### Added
+
+- **Single source per URL (Chromium bug workaround)**: Once the first request for a URL was served from the network (cache miss), all further requests for that URL in the same SW session are also served from the network, even after the file has been restored to cache. Background restore still runs for the next page load. Avoids `PIPELINE_ERROR_READ` when the media pipeline would ignore cache responses after the first chunk came from network. See [Chromium #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867), [phoboslab test case](https://phoboslab.org/files/bugs/chrome-serviceworker-video/). Documented in README, JSDoc, and reference.mdc.
+
+### Changed
+
+- **Cache miss behavior**: On cache miss the plugin now returns the network response directly (`fetch(request)`) instead of returning `undefined`, so the request is handled by the plugin and the browser's Range header is preserved. Required for the single-source workaround and correct 206 responses from the network.
+- **Documentation**: Option `restoreMissingToCache` description updated — on cache miss the plugin serves the request from the network and starts background restore; no longer "returns undefined". README.ru: `assets` described as pathnames only, not "URL ресурсов".
+
+### Performance
+
+- Early exit in fetch handler when URL was already served from network in this session (avoids slot acquisition and cache lookup).
+- Shared noop release in rangeSlot when `prioritizeLatestRequest` is false (avoids allocating a new function per request).
+
 ## [1.0.30] - 2026-03-03
 
 ### Fixed

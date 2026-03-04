@@ -109,7 +109,7 @@ Options are grouped by purpose. Defaults work for most scenarios.
 
 | Option                    | Type       | Default                       | Description                                                                                                                                 |
 | ------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: return `undefined` (let the next plugin / network handle the request) and start a background restore that fetches the full file into cache for subsequent requests. |
+| `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: serve the request from the network and start a background restore that fetches the full file into cache for subsequent requests. |
 | `assets`                  | `string[]` | —                             | **Pathnames only** (e.g. `/assets/Meeting.mp4`), not full URLs — origin is unknown at build time. When set, restore on cache miss runs only for requests whose pathname is in this list. When unset, restore runs for any URL. |
 | `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses. Empty string to omit.                                                                                       |
 
@@ -122,6 +122,8 @@ Options are grouped by purpose. Defaults work for most scenarios.
 ## Important notes
 
 ⚠️ **Do not cache huge files and ranges** – mobile devices may not handle them well. Range data is read sequentially from the cached file stream (Cache API does not support random access), so requesting a range near the end of a very large file can be slow; prefer smaller assets.
+
+**Single source per URL (Chromium bug workaround)** – In Chromium, if a video starts loading from the network and later range requests are served from the service worker cache, the media pipeline ignores the cached response and playback fails with `PIPELINE_ERROR_READ`. To avoid this, the plugin keeps **one source per URL for the lifetime of the SW**: once the first request for a URL was served from the network (cache miss), all further requests for that URL in the same session are also served from the network, even after the file has been restored to cache. Background restore still runs so that the next page load (or after the SW restarts) can serve from cache. See [Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) and [phoboslab test case](https://phoboslab.org/files/bugs/chrome-serviceworker-video/).
 
 ## Usage example
 
@@ -190,11 +192,12 @@ const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the file is missing, the plugin returns `undefined` so the request can be handled by the next plugin / network (passthrough). If `restoreMissingToCache` is true, it also starts a background restore that fetches the full file into cache for subsequent requests **only when the request pathname is in the `assets` list** (if `assets` is set; otherwise restore may run for any URL). `assets` must be pathnames only (e.g. `/assets/Meeting.mp4`), not full URLs.
-4. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
-5. Reads the requested byte range from the file.
-6. Caches the ready‑to‑use partial response.
-7. Returns HTTP `206 Partial Content`.
+3. If the file was already served from the network for this URL in this SW session ([Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) workaround), the plugin passes the request through to the network again instead of serving from cache.
+4. If the file is missing, the plugin returns a passthrough response (network) and, if `restoreMissingToCache` is true, starts a background restore that fetches the full file into cache for subsequent requests **only when the request pathname is in the `assets` list** (if `assets` is set; otherwise restore may run for any URL). `assets` must be pathnames only (e.g. `/assets/Meeting.mp4`), not full URLs. The URL is recorded so that later requests for it in this session keep using the network.
+5. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
+6. Reads the requested byte range from the file.
+7. Caches the ready‑to‑use partial response.
+8. Returns HTTP `206 Partial Content`.
 
 ## 🤝 License
 

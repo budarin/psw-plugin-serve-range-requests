@@ -80,9 +80,11 @@ export function createRangeSlotManager(
         return state;
     }
 
+    const noopRelease = (): void => {};
+
     function acquireRangeSlot(url: UrlString): Promise<(() => void) | null> {
         if (!prioritizeLatestRequest) {
-            return Promise.resolve(() => {});
+            return Promise.resolve(noopRelease);
         }
 
         const state = getOrCreateUrlState(url);

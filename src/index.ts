@@ -130,6 +130,13 @@ interface RangeHandlerContext {
         request: Request
     ) => Promise<Response | undefined>;
     invalidateCache: () => void;
+    /**
+     * URL, по которым уже отдавали ответ из сети (passthrough) в этой сессии SW.
+     * Для таких URL не переключаемся на кэш до перезапуска SW (обход бага Chromium: смена источника ломает плеер).
+     * @see https://bugs.chromium.org/p/chromium/issues/detail?id=1026867
+     */
+    urlsServedFromNetwork: Set<UrlString>;
+    maxTrackedUrls: number;
 }
 
 /** Результат успешной попытки ответа из полного кэша. */
@@ -143,8 +150,17 @@ interface TryFullCacheResult {
 /**
  * Плагин для обработки HTTP Range запросов: отдаёт частичное содержимое файлов из кеша SW.
  *
+ * В рамках одной сессии SW для каждого URL используется только один источник (сеть или кэш):
+ * если первый запрос по URL был отдан из сети (промах кэша), все последующие запросы по этому URL
+ * до перезапуска SW тоже отдаются из сети, даже когда файл уже в кэше. Восстановление в кэш при этом
+ * по-прежнему выполняется в фоне для следующих загрузок. Это вынужденное поведение из-за бага Chromium:
+ * при смене источника в середине воспроизведения (сеть → кэш) медиа-пайплайн игнорирует ответ из кэша
+ * и воспроизведение падает с PIPELINE_ERROR_READ.
+ *
  * @param options - Опции конфигурации плагина
  * @returns ServiceWorkerPlugin для обработки Range запросов
+ * @see https://bugs.chromium.org/p/chromium/issues/detail?id=1026867
+ * @see https://phoboslab.org/files/bugs/chrome-serviceworker-video/
  */
 export function serveRangeRequests(
     options: RangePluginOptions
@@ -175,6 +191,11 @@ export function serveRangeRequests(
     let cacheInstance: Cache | null = null;
     /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
     const restoreInProgress = new Set<UrlString>();
+    /**
+     * URL, по которым уже отдавали ответ из сети в этой сессии SW.
+     * Не переключаемся на кэш для этих URL до перезапуска SW (обход Chromium bug 1026867).
+     */
+    const urlsServedFromNetwork = new Set<UrlString>();
 
     const { acquireRangeSlot, getOrCreateUrlState } = createRangeSlotManager({
         maxConcurrentRangesPerUrl,
@@ -200,6 +221,8 @@ export function serveRangeRequests(
         invalidateCache: () => {
             cacheInstance = null;
         },
+        urlsServedFromNetwork,
+        maxTrackedUrls,
     };
 
     /**
@@ -271,7 +294,7 @@ export function serveRangeRequests(
 
     /**
      * Пытается отдать диапазон из закешированного полного файла: слот, matchByUrl, restore при промахе, serveRangeFromCachedResponse.
-     * Возвращает undefined при отмене, промахе кэша или ошибке.
+     * При промахе возвращает network fetch(original request), иначе TryFullCacheResult или undefined.
      */
     async function tryServeRangeFromCachedFile(
         request: Request,
@@ -281,7 +304,7 @@ export function serveRangeRequests(
         requestAbortController: AbortController,
         abortPromise: Promise<undefined>,
         ctx: RangeHandlerContext
-    ): Promise<TryFullCacheResult | undefined> {
+    ): Promise<TryFullCacheResult | Response | undefined> {
         const release = await Promise.race([
             ctx.acquireRangeSlot(url),
             abortPromise.then(() => undefined),
@@ -322,6 +345,14 @@ export function serveRangeRequests(
             }
 
             if (!cachedResponse) {
+                if (ctx.urlsServedFromNetwork.size >= ctx.maxTrackedUrls) {
+                    const first = ctx.urlsServedFromNetwork.values().next().value;
+                    if (first !== undefined) {
+                        ctx.urlsServedFromNetwork.delete(first);
+                    }
+                }
+                ctx.urlsServedFromNetwork.add(url);
+
                 let urlInAssets = !ctx.assetUrls;
                 if (ctx.assetUrls) {
                     try {
@@ -335,14 +366,16 @@ export function serveRangeRequests(
                 }
                 if (ctx.enableLogging) {
                     console.log(
-                        `serveRangeRequests plugin: skipping ${url} (file not in cache)`
+                        `serveRangeRequests plugin: skipping ${url} (file not in cache), returning passthrough response`
                     );
                 }
-                return undefined;
+                // На промахе не меняем параметры запроса: отдаём сетью "родной" request браузера,
+                // чтобы не потерять Range и не получить 200 вместо 206.
+                return await fetch(request);
             }
             if (workSignal.aborted) return undefined;
 
-            return serveRangeFromCachedResponse(
+            const serveResult = serveRangeFromCachedResponse(
                 cachedResponse,
                 request,
                 rangeHeader,
@@ -354,6 +387,7 @@ export function serveRangeRequests(
                     fileMetadataCache: ctx.fileMetadataCache,
                 }
             );
+            return serveResult;
         } catch (error) {
             const isAbort =
                 (error instanceof Error &&
@@ -427,6 +461,17 @@ export function serveRangeRequests(
             }
 
             const url: UrlString = request.url;
+
+            // Ранний выход: URL уже отдавали из сети в этой сессии — не трогаем кэш и слот (обход Chromium bug 1026867).
+            if (urlsServedFromNetwork.has(url)) {
+                if (enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: ${url} already served from network this session, passthrough (Chromium bug workaround)`
+                    );
+                }
+                return await fetch(request);
+            }
+
             const cacheKey: RangeCacheKey | undefined =
                 maxCachedRanges > 0 ? `${url}|${rangeHeader}` : undefined;
 
@@ -449,16 +494,17 @@ export function serveRangeRequests(
                 });
             }
 
+            const restoreOptions: RestoreOptions = {
+                getCache,
+                passthroughHeader,
+                fetchPassthrough: context.fetchPassthrough,
+                enableLogging,
+                cacheName,
+                restoreInProgress,
+            };
             const handlerContext: RangeHandlerContext = {
                 ...baseHandlerContext,
-                restoreOptions: {
-                    getCache,
-                    passthroughHeader,
-                    fetchPassthrough: context.fetchPassthrough,
-                    enableLogging,
-                    cacheName,
-                    restoreInProgress,
-                },
+                restoreOptions,
             };
 
             try {
@@ -495,6 +541,10 @@ export function serveRangeRequests(
                         );
                     }
                     return;
+                }
+
+                if (result instanceof Response) {
+                    return result;
                 }
 
                 const { stream, headers, range } = result;

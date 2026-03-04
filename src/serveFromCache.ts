@@ -1,4 +1,8 @@
-import { HEADER_CONTENT_LENGTH } from '@budarin/http-constants/headers';
+import {
+    HEADER_CONTENT_LENGTH,
+    HEADER_ETAG,
+    HEADER_LAST_MODIFIED,
+} from '@budarin/http-constants/headers';
 
 import type { FileMetadata, UrlString } from './types.js';
 import {
@@ -52,6 +56,20 @@ export function serveRangeFromCachedResponse(
     if (!metadata) {
         metadata = extractMetadataFromResponse(cachedResponse);
     }
+    // Всегда подставляем ETag/Last-Modified из текущего закешированного ответа,
+    // если в metadata их нет (например, запись в fileMetadataCache от старого ответа).
+    if (metadata) {
+        const etag = cachedResponse.headers.get(HEADER_ETAG);
+        const lastModified =
+            cachedResponse.headers.get(HEADER_LAST_MODIFIED);
+        if (etag || lastModified) {
+            metadata = {
+                ...metadata,
+                ...(etag && { etag }),
+                ...(lastModified && { lastModified }),
+            };
+        }
+    }
     if (!metadata) {
         if (enableLogging) {
             console.log(
@@ -87,7 +105,8 @@ export function serveRangeFromCachedResponse(
     const stream = createRangeStream(
         cachedResponse.body,
         range,
-        workSignal
+        workSignal,
+        { enableLogging, url }
     );
 
     const headers = buildRangeResponseHeaders(
