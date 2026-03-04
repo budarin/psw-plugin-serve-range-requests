@@ -10,11 +10,7 @@ import {
     extractMetadataFromResponse,
 } from './rangeResponse.js';
 import type { Range } from './rangeUtils.js';
-import {
-    createRangeStream,
-    ifRangeMatches,
-    parseRangeHeader,
-} from './rangeUtils.js';
+import { createRangeStream, parseRangeHeader } from './rangeUtils.js';
 
 export interface ServeRangeFromCachedOptions {
     url: UrlString;
@@ -22,6 +18,8 @@ export interface ServeRangeFromCachedOptions {
     rangeResponseCacheControl?: string | undefined;
     enableLogging: boolean;
     fileMetadataCache: Map<UrlString, FileMetadata>;
+    /** Метаданные, уже извлечённые из cachedResponse (избегаем повторного парсинга заголовков). */
+    precomputedMetadata?: FileMetadata | undefined;
 }
 
 export interface ServeRangeResult {
@@ -32,22 +30,28 @@ export interface ServeRangeResult {
 }
 
 /**
- * Отдаёт диапазон из полного закешированного ответа: метаданные, If-Range, парсинг Range,
- * createRangeStream, buildRangeResponseHeaders. Возвращает undefined при несовпадении If-Range,
- * отсутствии метаданных или тела ответа.
+ * Отдаёт диапазон из полного закешированного ответа: метаданные (из кеша или precomputedMetadata),
+ * парсинг Range, createRangeStream, buildRangeResponseHeaders. Возвращает undefined при
+ * отсутствии метаданных или тела ответа. Проверка If-Range выполняется в вызывающем коде (index).
  */
 export function serveRangeFromCachedResponse(
     cachedResponse: Response,
-    request: Request,
+    _request: Request,
     rangeHeader: string,
     workSignal: AbortSignal,
     options: ServeRangeFromCachedOptions
 ): ServeRangeResult | undefined {
-    const { url, rangeResponseCacheControl, enableLogging, fileMetadataCache } =
-        options;
+    const {
+        url,
+        rangeResponseCacheControl,
+        enableLogging,
+        fileMetadataCache,
+        precomputedMetadata,
+    } = options;
 
-    let metadata = fileMetadataCache.get(url);
-    if (metadata) {
+    let metadata = precomputedMetadata ?? fileMetadataCache.get(url);
+    const fromCache = !precomputedMetadata && !!metadata;
+    if (metadata && fromCache) {
         const contentLength = cachedResponse.headers.get(HEADER_CONTENT_LENGTH);
         if (contentLength !== String(metadata.size)) {
             metadata = undefined;
@@ -79,14 +83,10 @@ export function serveRangeFromCachedResponse(
         return undefined;
     }
 
-    const ifRangeHeader = request.headers.get('If-Range');
-    if (ifRangeHeader && !ifRangeMatches(ifRangeHeader, metadata)) {
-        if (enableLogging) {
-            console.log(
-                `serveRangeRequests plugin: skipping ${url} (If-Range does not match)`
-            );
-        }
-        return undefined;
+    // LRU: при использовании метаданных из кеша обновляем порядок (актуальная запись в конце)
+    if (fromCache && metadata) {
+        fileMetadataCache.delete(url);
+        fileMetadataCache.set(url, metadata);
     }
 
     const range = parseRangeHeader(rangeHeader, metadata.size);

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.32] - 2026-03-05
+
+### Added
+
+- **getRangeRequestSource(request, cachedMetadata)** in `rangeUtils.ts`: determines from request headers (If-Range vs cache ETag/Last-Modified) whether the client is continuing a network response; used to avoid switching to cache mid-playback (Chromium #1026867).
+- **Per-client tracking (urlsServedFromNetworkByClient)**: URLs served from network (passthrough) are recorded per client (tab). After restore, cache ETag equals server ETag so getRangeRequestSource cannot tell; the per-client set ensures we keep passthrough in that tab. After reload, new clientId → cache is used.
+
+### Changed
+
+- **Single-source workaround**: Now uses both per-client Set and getRangeRequestSource. Cache is always checked first; on hit we passthrough if URL is in the client’s “served from network” set or if getRangeRequestSource returns `'network'`. Fixes playback error when reloading with file not in cache and restore fills cache during playback.
+- **Documentation**: README and README.ru updated — “one source per URL per tab”, If-Range check, and “after reload cache is used”. reference.mdc updated with urlsServedFromNetworkByClient and two-step check.
+- **Range caching**: When caching a range, the plugin reads the full range into a buffer, stores it in range cache, and returns it (single read). Streaming while populating cache was reverted due to observed slowdown.
+
+### Performance
+
+- **precomputedMetadata**: Passed from handler to serveRangeFromCachedResponse to avoid double extraction of metadata from the cached response.
+- **Metadata cache**: LRU touch on read so hot URLs keep their metadata entries.
+- **serveRangeFromCachedResponse**: Redundant If-Range check removed (source decision is made in the handler via getRangeRequestSource).
+
 ## [1.0.31] - 2026-03-04
 
 ### Added

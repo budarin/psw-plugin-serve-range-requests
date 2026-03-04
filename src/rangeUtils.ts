@@ -73,6 +73,30 @@ export function parseRangeHeader(
 }
 
 /**
+ * Определяет источник предыдущего ответа для клиента по заголовкам запроса и метаданным кэша.
+ * Бизнес-логика обхода Chromium bug 1026867: не переключать источник (сеть → кэш) в середине воспроизведения.
+ *
+ * Если в запросе есть If-Range и он не совпадает с метаданными закэшированного ответа — клиент
+ * держит валидатор от сетевого ответа, значит предыдущий ответ был с сети; отдавать из кэша нельзя.
+ * Если If-Range совпадает или отсутствует — можно отдавать из кэша.
+ *
+ * @see https://bugs.chromium.org/p/chromium/issues/detail?id=1026867
+ */
+export function getRangeRequestSource(
+    request: Request,
+    cachedMetadata: IfRangeMetadata
+): 'cache' | 'network' {
+    const ifRangeHeader = request.headers.get('If-Range');
+    if (!ifRangeHeader?.trim()) {
+        return 'cache';
+    }
+    if (ifRangeMatches(ifRangeHeader, cachedMetadata)) {
+        return 'cache';
+    }
+    return 'network';
+}
+
+/**
  * Проверяет совпадение заголовка If-Range с метаданными (ETag или Last-Modified).
  */
 export function ifRangeMatches(

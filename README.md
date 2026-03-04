@@ -59,7 +59,7 @@ Users flip back and forth — the same pages are requested again. Range cache he
 ---
 
 **Range cache (`maxCachedRanges`, `maxCacheableRangeSize`)**  
-The plugin caches ready range responses and file metadata (size, type) for the same URLs. **maxCachedRanges** limits both — how many range responses and how many metadata entries to keep. **maxCacheableRangeSize** — upper cap per range; larger ranges are not cached (to avoid memory spikes). Eviction is LRU. For video and audio scrubbing, set **maxCachedRanges** to 0 — the cache is not used.
+The plugin caches ready range responses and file metadata (size, type) for the same URLs. **maxCachedRanges** limits how many range responses and metadata entries to keep. **maxCacheableRangeSize** is the upper cap per range; larger ranges are not cached (to avoid memory spikes). For video and audio scrubbing, set **maxCachedRanges** to 0 — the cache is not used.
 
 **Concurrency (`maxConcurrentRangesPerUrl`)**  
 Only applies when `prioritizeLatestRequest: true`. For video and audio, 1 is optimal — queues slow things down. When `false`, no limit — all requests run in parallel.
@@ -68,7 +68,7 @@ Only applies when `prioritizeLatestRequest: true`. For video and audio, 1 is opt
 `true` (default) — for video and audio: prioritize the latest request, abort others on new request. `false` — for maps and docs: no queues, all requests run in parallel.
 
 **206 responses and browser cache**  
-By default, the plugin sets `Cache-Control: max-age=31536000, immutable` on 206 responses so the browser caches them. Override with **rangeResponseCacheControl** (e.g. `no-store`, `max-age=3600`, or `''` to leave the header unset).
+The plugin does not set `Cache-Control` on 206 responses by default. To allow the browser to cache them, set **rangeResponseCacheControl** (e.g. `'max-age=31536000, immutable'`). Use `'no-store'` to forbid caching, or omit the option to leave the header unset.
 
 When tuning options, look at real traffic — use the Network tab in DevTools.
 
@@ -111,7 +111,7 @@ Options are grouped by purpose. Defaults work for most scenarios.
 | ------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: serve the request from the network and start a background restore that fetches the full file into cache for subsequent requests. |
 | `assets`                  | `string[]` | —                             | **Pathnames only** (e.g. `/assets/Meeting.mp4`), not full URLs — origin is unknown at build time. When set, restore on cache miss runs only for requests whose pathname is in this list. When unset, restore runs for any URL. |
-| `rangeResponseCacheControl` | `string` | `max-age=31536000, immutable` | Cache-Control for 206 responses. Empty string to omit.                                                                                       |
+| `rangeResponseCacheControl` | `string` | — | Optional Cache-Control for 206 responses (e.g. `'max-age=31536000, immutable'` for browser caching). If not set, the header is not sent. |
 
 ### Debug
 
@@ -123,7 +123,7 @@ Options are grouped by purpose. Defaults work for most scenarios.
 
 ⚠️ **Do not cache huge files and ranges** – mobile devices may not handle them well. Range data is read sequentially from the cached file stream (Cache API does not support random access), so requesting a range near the end of a very large file can be slow; prefer smaller assets.
 
-**Single source per URL (Chromium bug workaround)** – In Chromium, if a video starts loading from the network and later range requests are served from the service worker cache, the media pipeline ignores the cached response and playback fails with `PIPELINE_ERROR_READ`. To avoid this, the plugin keeps **one source per URL for the lifetime of the SW**: once the first request for a URL was served from the network (cache miss), all further requests for that URL in the same session are also served from the network, even after the file has been restored to cache. Background restore still runs so that the next page load (or after the SW restarts) can serve from cache. See [Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) and [phoboslab test case](https://phoboslab.org/files/bugs/chrome-serviceworker-video/).
+**Single source per URL, per tab (Chromium bug workaround)** – In Chromium, if a video starts loading from the network and later range requests are served from the service worker cache, the media pipeline ignores the cached response and playback fails with `PIPELINE_ERROR_READ`. To avoid this, the plugin keeps **one source per URL per tab**: once a URL was served from the network in that tab (e.g. because the file was not in cache), further requests for that URL in the same tab stay on the network until the page is reloaded, even if the file has since been restored to cache. After a reload, the cache is used when the file is present. See [Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) and [phoboslab test case](https://phoboslab.org/files/bugs/chrome-serviceworker-video/).
 
 ## Usage example
 
@@ -192,12 +192,9 @@ const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
 
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
-3. If the file was already served from the network for this URL in this SW session ([Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) workaround), the plugin passes the request through to the network again instead of serving from cache.
-4. If the file is missing, the plugin returns a passthrough response (network) and, if `restoreMissingToCache` is true, starts a background restore that fetches the full file into cache for subsequent requests **only when the request pathname is in the `assets` list** (if `assets` is set; otherwise restore may run for any URL). `assets` must be pathnames only (e.g. `/assets/Meeting.mp4`), not full URLs. The URL is recorded so that later requests for it in this session keep using the network.
-5. If the request has `If-Range` (ETag or Last-Modified), serves from cache only when the stored validator matches (otherwise passes the request through).
-6. Reads the requested byte range from the file.
-7. Caches the ready‑to‑use partial response.
-8. Returns HTTP `206 Partial Content`.
+3. If the file is in cache: the plugin only serves from cache when it can keep the same source for that tab and URL; otherwise it passes the request through to the network ([Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) workaround).
+4. If the file is missing, the plugin serves the request from the network and, if `restoreMissingToCache` is true, starts a background restore that fetches the full file into cache for subsequent requests **only when the request pathname is in the `assets` list** (if `assets` is set; otherwise restore may run for any URL). `assets` must be pathnames only (e.g. `/assets/Meeting.mp4`), not full URLs. In that tab, later requests for that URL keep using the network until the page is reloaded.
+5. Reads the requested byte range from the file and returns HTTP `206 Partial Content`. When range caching is enabled, the response is cached for reuse.
 
 ## 🤝 License
 

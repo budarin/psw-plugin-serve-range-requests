@@ -23,9 +23,11 @@ import { startRestore, type RestoreOptions } from './restore.js';
 import { serveRangeFromCachedResponse } from './serveFromCache.js';
 import {
     type Range,
+    getRangeRequestSource,
     shouldCacheRange,
     shouldProcessFile,
 } from './rangeUtils.js';
+import { extractMetadataFromResponse } from './rangeResponse.js';
 
 export {
     VIDEO_PRESET,
@@ -131,11 +133,11 @@ interface RangeHandlerContext {
     ) => Promise<Response | undefined>;
     invalidateCache: () => void;
     /**
-     * URL, по которым уже отдавали ответ из сети (passthrough) в этой сессии SW.
-     * Для таких URL не переключаемся на кэш до перезапуска SW (обход бага Chromium: смена источника ломает плеер).
-     * @see https://bugs.chromium.org/p/chromium/issues/detail?id=1026867
+     * По clientId — URL, по которым уже отдавали из сети в этой вкладке.
+     * После restore ETag в кэше = ETag сервера, getRangeRequestSource не отличит — нужен явный учёт.
      */
-    urlsServedFromNetwork: Set<UrlString>;
+    urlsServedFromNetworkByClient: Map<string, Set<UrlString>>;
+    clientId: string;
     maxTrackedUrls: number;
 }
 
@@ -150,12 +152,11 @@ interface TryFullCacheResult {
 /**
  * Плагин для обработки HTTP Range запросов: отдаёт частичное содержимое файлов из кеша SW.
  *
- * В рамках одной сессии SW для каждого URL используется только один источник (сеть или кэш):
- * если первый запрос по URL был отдан из сети (промах кэша), все последующие запросы по этому URL
- * до перезапуска SW тоже отдаются из сети, даже когда файл уже в кэше. Восстановление в кэш при этом
- * по-прежнему выполняется в фоне для следующих загрузок. Это вынужденное поведение из-за бага Chromium:
- * при смене источника в середине воспроизведения (сеть → кэш) медиа-пайплайн игнорирует ответ из кэша
- * и воспроизведение падает с PIPELINE_ERROR_READ.
+ * Сначала всегда проверяется кэш. Чтобы не переключать источник в середине воспроизведения
+ * (обход Chromium bug 1026867), при попадании в кэш делаем passthrough, если: (1) для этого
+ * клиента (clientId) мы уже отдавали этот URL из сети в этой вкладке — после restore ETag
+ * в кэше совпадает с сетевым, getRangeRequestSource не отличит; (2) иначе — getRangeRequestSource()
+ * по If-Range и ETag/Last-Modified кэша вернул 'network'. После перезагрузки clientId новый — кэш используется.
  *
  * @param options - Опции конфигурации плагина
  * @returns ServiceWorkerPlugin для обработки Range запросов
@@ -191,11 +192,8 @@ export function serveRangeRequests(
     let cacheInstance: Cache | null = null;
     /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
     const restoreInProgress = new Set<UrlString>();
-    /**
-     * URL, по которым уже отдавали ответ из сети в этой сессии SW.
-     * Не переключаемся на кэш для этих URL до перезапуска SW (обход Chromium bug 1026867).
-     */
-    const urlsServedFromNetwork = new Set<UrlString>();
+    /** По clientId — URL, по которым уже отдавали из сети (passthrough) в этой вкладке. После reload clientId новый — кэш используется. */
+    const urlsServedFromNetworkByClient = new Map<string, Set<UrlString>>();
 
     const { acquireRangeSlot, getOrCreateUrlState } = createRangeSlotManager({
         maxConcurrentRangesPerUrl,
@@ -221,7 +219,8 @@ export function serveRangeRequests(
         invalidateCache: () => {
             cacheInstance = null;
         },
-        urlsServedFromNetwork,
+        urlsServedFromNetworkByClient,
+        clientId: '', // задаётся при построении handlerContext из event.clientId
         maxTrackedUrls,
     };
 
@@ -345,13 +344,16 @@ export function serveRangeRequests(
             }
 
             if (!cachedResponse) {
-                if (ctx.urlsServedFromNetwork.size >= ctx.maxTrackedUrls) {
-                    const first = ctx.urlsServedFromNetwork.values().next().value;
-                    if (first !== undefined) {
-                        ctx.urlsServedFromNetwork.delete(first);
-                    }
+                let setForClient = ctx.urlsServedFromNetworkByClient.get(ctx.clientId);
+                if (!setForClient) {
+                    setForClient = new Set<UrlString>();
+                    ctx.urlsServedFromNetworkByClient.set(ctx.clientId, setForClient);
                 }
-                ctx.urlsServedFromNetwork.add(url);
+                if (setForClient.size >= ctx.maxTrackedUrls) {
+                    const first = setForClient.values().next().value;
+                    if (first !== undefined) setForClient.delete(first);
+                }
+                setForClient.add(url);
 
                 let urlInAssets = !ctx.assetUrls;
                 if (ctx.assetUrls) {
@@ -375,6 +377,26 @@ export function serveRangeRequests(
             }
             if (workSignal.aborted) return undefined;
 
+            const setForClient = ctx.urlsServedFromNetworkByClient.get(ctx.clientId);
+            if (setForClient?.has(url)) {
+                if (ctx.enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: ${url} already served from network for this client, passthrough (Chromium bug workaround)`
+                    );
+                }
+                return await fetch(request);
+            }
+
+            const cachedMetadata = extractMetadataFromResponse(cachedResponse);
+            if (cachedMetadata && getRangeRequestSource(request, cachedMetadata) === 'network') {
+                if (ctx.enableLogging) {
+                    console.log(
+                        `serveRangeRequests plugin: ${url} client has network validator (If-Range), passthrough (Chromium bug workaround)`
+                    );
+                }
+                return await fetch(request);
+            }
+
             const serveResult = serveRangeFromCachedResponse(
                 cachedResponse,
                 request,
@@ -385,6 +407,7 @@ export function serveRangeRequests(
                     rangeResponseCacheControl: ctx.rangeResponseCacheControl,
                     enableLogging: ctx.enableLogging,
                     fileMetadataCache: ctx.fileMetadataCache,
+                    precomputedMetadata: cachedMetadata ?? undefined,
                 }
             );
             return serveResult;
@@ -462,16 +485,6 @@ export function serveRangeRequests(
 
             const url: UrlString = request.url;
 
-            // Ранний выход: URL уже отдавали из сети в этой сессии — не трогаем кэш и слот (обход Chromium bug 1026867).
-            if (urlsServedFromNetwork.has(url)) {
-                if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: ${url} already served from network this session, passthrough (Chromium bug workaround)`
-                    );
-                }
-                return await fetch(request);
-            }
-
             const cacheKey: RangeCacheKey | undefined =
                 maxCachedRanges > 0 ? `${url}|${rangeHeader}` : undefined;
 
@@ -502,9 +515,11 @@ export function serveRangeRequests(
                 cacheName,
                 restoreInProgress,
             };
+            const clientId = event.clientId ?? '';
             const handlerContext: RangeHandlerContext = {
                 ...baseHandlerContext,
                 restoreOptions,
+                clientId,
             };
 
             try {

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     parseRangeHeader,
     ifRangeMatches,
+    getRangeRequestSource,
     shouldCacheRange,
     matchesGlob,
     shouldProcessFile,
@@ -114,6 +115,38 @@ describe('ifRangeMatches', () => {
 
     it('нет etag и lastModified — false', () => {
         expect(ifRangeMatches('"x"', {})).toBe(false);
+    });
+});
+
+describe('getRangeRequestSource', () => {
+    const cachedMetadata = { etag: '"cache-etag"', lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT' };
+
+    it('нет If-Range — cache (первый запрос или можно отдавать из кэша)', () => {
+        const request = new Request('https://example.com/video.mp4', {
+            headers: { Range: 'bytes=0-1023' },
+        });
+        expect(getRangeRequestSource(request, cachedMetadata)).toBe('cache');
+    });
+
+    it('If-Range совпадает с кэшем — cache', () => {
+        const request = new Request('https://example.com/video.mp4', {
+            headers: { Range: 'bytes=0-1023', 'If-Range': '"cache-etag"' },
+        });
+        expect(getRangeRequestSource(request, cachedMetadata)).toBe('cache');
+    });
+
+    it('If-Range не совпадает с кэшем — network (клиент от сетевого ответа)', () => {
+        const request = new Request('https://example.com/video.mp4', {
+            headers: { Range: 'bytes=1024-2047', 'If-Range': '"server-etag"' },
+        });
+        expect(getRangeRequestSource(request, cachedMetadata)).toBe('network');
+    });
+
+    it('If-Range пустой — cache', () => {
+        const request = new Request('https://example.com/video.mp4', {
+            headers: { Range: 'bytes=0-', 'If-Range': '   ' },
+        });
+        expect(getRangeRequestSource(request, cachedMetadata)).toBe('cache');
     });
 });
 
