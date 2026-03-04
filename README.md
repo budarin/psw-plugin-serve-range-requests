@@ -38,6 +38,8 @@ serveRangeRequests({ cacheName: 'media-cache' });
 
 More on scenarios (video, maps, documents) below. [All options](#all-options) are at the end of this section.
 
+The plugin only handles GET requests with a Range header that match the include/exclude filters (when set). For each such range request it returns a response itself: either 206 from cache (from the full file or from the range cache), or a response from the network — on cache miss, for the Chromium workaround (this URL was already served from the network in this tab), or when the client sends If-Range. All other requests — without Range, not GET, or not matching the filters — the plugin does not handle and passes to the next plugins in the chain.
+
 ## When to cache what — by scenario
 
 The plugin caches two things: **file metadata** (size, type) and **ready range responses**. Whether range caching helps depends on how users interact with the content.
@@ -110,7 +112,7 @@ Options are grouped by purpose. Defaults work for most scenarios.
 | Option                    | Type       | Default                       | Description                                                                                                                                 |
 | ------------------------- | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `restoreMissingToCache`   | `boolean`  | `true`                        | On cache miss: serve the request from the network and start a background restore that fetches the full file into cache for subsequent requests. |
-| `assets`                  | `string[]` | —                             | **Pathnames only** (e.g. `/assets/Meeting.mp4`), not full URLs — origin is unknown at build time. When set, restore on cache miss runs only for requests whose pathname is in this list. When unset, restore runs for any URL. |
+| `assets`                  | `string[]` | —                             | **Pathnames only** (e.g. `/assets/Meeting.mp4`), not full URLs — origin is unknown at build time. When set, restore on cache miss runs only for requests whose pathname is in this list. |
 | `rangeResponseCacheControl` | `string` | — | Optional Cache-Control for 206 responses (e.g. `'max-age=31536000, immutable'` for browser caching). If not set, the header is not sent. |
 
 ### Debug
@@ -193,7 +195,7 @@ const { VIDEO_ADAPTIVE, AUDIO_ADAPTIVE, MAPS_ADAPTIVE, DOCS_ADAPTIVE } =
 1. Checks the `Range` header in the request.
 2. Looks up the file in the specified cache.
 3. If the file is in cache: the plugin only serves from cache when it can keep the same source for that tab and URL; otherwise it passes the request through to the network ([Chromium bug #1026867](https://bugs.chromium.org/p/chromium/issues/detail?id=1026867) workaround).
-4. If the file is missing, the plugin serves the request from the network and, if `restoreMissingToCache` is true, starts a background restore that fetches the full file into cache for subsequent requests **only when the request pathname is in the `assets` list** (if `assets` is set; otherwise restore may run for any URL). `assets` must be pathnames only (e.g. `/assets/Meeting.mp4`), not full URLs. In that tab, later requests for that URL keep using the network until the page is reloaded.
+4. If the file is missing, the plugin serves the request from the network and, if `restoreMissingToCache` is true and the request pathname is in the `assets` list, starts a background restore that fetches the full file into cache for subsequent requests. `assets` must be pathnames only (e.g. `/assets/Meeting.mp4`), not full URLs. In that tab, later requests for that URL keep using the network until the page is reloaded.
 5. Reads the requested byte range from the file and returns HTTP `206 Partial Content`. When range caching is enabled, the response is cached for reuse.
 
 ## 🤝 License

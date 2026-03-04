@@ -376,7 +376,7 @@ export function serveRangeRequests(
                 }
                 setForClient.add(url);
 
-                let urlInAssets = !ctx.assetUrls;
+                let urlInAssets = false;
                 if (ctx.assetUrls) {
                     try {
                         urlInAssets = ctx.assetUrls.has(new URL(url).pathname);

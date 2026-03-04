@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.34] - 2026-03-06
+
+### Changed
+
+- **Restore when `assets` is unset**: Restore on cache miss now runs only when `assets` is set and the request pathname is in the list. When `assets` is not set, the plugin no longer restores any URL to cache. Aligns with the agreed behavior; documented in README and README.ru.
+- **Documentation**: Added a short paragraph (after the quick start example) in README and README.ru describing what the plugin handles (GET + Range + filters → 206 or network response) and what it passes through to the next plugins. Removed passthrough-header implementation detail from that paragraph.
+- **Compatibility**: Relies on `context.passthroughHeader` being required in `PluginContext` from `@budarin/pluggable-serviceworker`; removed type assertion.
+
 ## [1.0.33] - 2026-03-06
 
 ### Performance
