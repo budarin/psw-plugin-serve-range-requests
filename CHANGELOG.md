@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.37] - 2026-03-11
+
+### Changed
+
+- **getOrCreateSetForClient**: Extracted helper for per-client "served from network" tracking: get-or-create Set for clientId, FIFO eviction when size ≥ maxTrackedUrls, used on cache miss before adding pathname. Removes duplicated logic in the handler.
+- **RangeHandlerContext**: JSDoc clarified — request-scoped dependencies for the range handler (cache, slots, restore, client tracking, config); explains why the context object is passed instead of many parameters.
+
 ## [1.0.36] - 2026-03-11
 
 ### Changed

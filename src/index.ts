@@ -123,7 +123,10 @@ export interface RangePluginOptions {
     logger?: Logger;
 }
 
-/** Контекст для шагов обработчика: полный кэш, семафор, restore, инвалидация. */
+/**
+ * Все зависимости для обработки одного range-запроса (request-scoped).
+ * Передаётся в tryServeRangeFromCachedFile, чтобы не раздувать сигнатуру; поля — кэш, слоты, restore, учёт клиента, конфиг.
+ */
 interface RangeHandlerContext {
     getCache: () => Promise<Cache>;
     cacheName: string;
@@ -188,6 +191,26 @@ function throwIfAborted(signal: AbortSignal): void {
     if (signal.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
     }
+}
+
+/**
+ * Возвращает Set pathname'ов для clientId; при переполнении (size >= maxSize) вытесняет один элемент (FIFO).
+ */
+function getOrCreateSetForClient(
+    map: Map<string, Set<Pathname>>,
+    clientId: string,
+    maxSize: number
+): Set<Pathname> {
+    let set = map.get(clientId);
+    if (!set) {
+        set = new Set<Pathname>();
+        map.set(clientId, set);
+    }
+    if (maxSize > 0 && set.size >= maxSize) {
+        const first = set.values().next().value;
+        if (first !== undefined) set.delete(first);
+    }
+    return set;
 }
 
 export function serveRangeRequests(
@@ -421,15 +444,11 @@ export function serveRangeRequests(
             }
 
             if (!cachedResponse) {
-                let setForClient = ctx.urlsServedFromNetworkByClient.get(ctx.clientId);
-                if (!setForClient) {
-                    setForClient = new Set<Pathname>();
-                    ctx.urlsServedFromNetworkByClient.set(ctx.clientId, setForClient);
-                }
-                if (setForClient.size >= ctx.maxTrackedUrls) {
-                    const first = setForClient.values().next().value;
-                    if (first !== undefined) setForClient.delete(first);
-                }
+                const setForClient = getOrCreateSetForClient(
+                    ctx.urlsServedFromNetworkByClient,
+                    ctx.clientId,
+                    ctx.maxTrackedUrls
+                );
                 setForClient.add(pathname);
 
                 const urlInAssets = ctx.assetUrls?.has(pathname) ?? false;
