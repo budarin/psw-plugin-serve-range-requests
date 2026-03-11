@@ -52,3 +52,17 @@
 7. **Pure logic in rangeUtils** — parseRangeHeader, ifRangeMatches, shouldCacheRange, createRangeStream, etc. unit-testable in Node.
 8. **Named exports only** — No default exports; public API is named (serveRangeRequests, RangePluginOptions, presets, getAdaptivePresets).
 9. **Single source (Chromium bug workaround)** — urlsServedFromNetworkByClient Map<clientId, Set<pathname>>; getOrCreateSetForClient for get/create Set + FIFO eviction per client; getRangeRequestSource(request, cachedMetadata). Chromium #1026867.
+
+## Cache miss behavior and synthetic 206 headers
+
+### Cache miss: network passthrough and optional restore
+
+- On cache miss (no full file in Cache API), the plugin returns the network response for the current request via `fetch(request)`.
+- If `assets` is set and the request pathname is in that list, the plugin starts a background restore (`startRestore(url, …)`) fire-and-forget. The current request is not blocked by restore.
+- If restore runs, it can still compete with the client request for bandwidth/server resources, but it should not delay the client response in the handler code.
+
+### Synthetic 206 headers
+
+- `buildRangeResponseHeaders` sets only: Accept-Ranges, Content-Range, Content-Length, Content-Type, and optionally Cache-Control.
+- It does **not** copy CORS headers (e.g. Access-Control-*) from the cached response into the synthetic 206 response.
+- If you need cross-origin synthetic 206 with CORS, you may need to copy Access-Control-* headers from the cached response into the synthetic response. Same-origin usually does not require this.
