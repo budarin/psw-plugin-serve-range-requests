@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.39] - 2026-03-11
+
+### Changed
+
+- **Error logging**: Plugin errors are now always logged regardless of the `enableLogging` option: unexpected errors in the fetch handler and range stream read errors in `createRangeStream` are always written via `logger.error` / `logger.warn`. The option continues to control only debug/verbose output.
+
 ## [1.0.38] - 2026-03-11
 
 ### Changed

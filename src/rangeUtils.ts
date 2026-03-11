@@ -335,7 +335,7 @@ export function createRangeStream(
                 try {
                     chunk = await reader.read();
                 } catch (readError) {
-                    if (enableLogging && pathname) {
+                    if (pathname) {
                         logger?.warn?.(
                             `serveRangeRequests plugin: range stream closed (read error) for ${pathname} bytes ${range.start}-${range.end}:`,
                             readError

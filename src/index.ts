@@ -708,12 +708,10 @@ export function serveRangeRequests(
                 // возвращаем undefined, чтобы Range обработал следующий плагин/сеть.
                 throwIfAborted(signal);
 
-                if (enableLogging) {
-                    context.logger?.error?.(
-                        `serveRangeRequests plugin: unexpected error for ${pathname}, returning undefined to allow passthrough:`,
-                        err
-                    );
-                }
+                context.logger?.error?.(
+                    `serveRangeRequests plugin: unexpected error for ${pathname}, returning undefined to allow passthrough:`,
+                    err
+                );
                 return;
             }
         },
