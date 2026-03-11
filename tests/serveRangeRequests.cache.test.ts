@@ -6,9 +6,10 @@ import {
 } from '@budarin/pluggable-serviceworker';
 import { serveRangeRequests } from '../src/index.js';
 
-function createFetchEvent(request: Request): FetchEvent {
+function createFetchEvent(request: Request, clientId = 'test-client'): FetchEvent {
     return {
         request,
+        clientId,
     } as unknown as FetchEvent;
 }
 
@@ -32,8 +33,25 @@ describe('serveRangeRequests — cache limits', () => {
     let cacheMatchSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
-        // Важно: Response.body — поток, его нельзя переиспользовать после чтения.
-        // Поэтому возвращаем новый Response на каждый вызов cache.match.
+        // normalizeUrl(pathname) и scopeOrigin (same-origin) используют self.location / self.registration.scope
+        const origin = 'https://example.com';
+        const scope = `${origin}/`;
+        Object.defineProperty(globalThis, 'self', {
+            value: {
+                location: { origin },
+                registration: { scope },
+            },
+            writable: true,
+        });
+        Object.defineProperty(globalThis, 'location', {
+            value: { origin },
+            writable: true,
+        });
+        Object.defineProperty(globalThis, 'registration', {
+            value: { scope },
+            writable: true,
+        });
+
         cacheMatchSpy = vi.fn().mockImplementation(async () => {
             return new Response(new Uint8Array(body), { headers });
         });
@@ -53,6 +71,7 @@ describe('serveRangeRequests — cache limits', () => {
     it('не кеширует диапазоны при maxCachedRanges = 0', async () => {
         const plugin: ServiceWorkerPlugin = serveRangeRequests({
             cacheName: 'test-cache',
+            include: ['*.mp4'],
             maxCachedRanges: 0,
         });
 
@@ -82,6 +101,7 @@ describe('serveRangeRequests — cache limits', () => {
     it('повторные вызовы не ломаются при maxCachedRanges = 0', async () => {
         const plugin: ServiceWorkerPlugin = serveRangeRequests({
             cacheName: 'test-cache',
+            include: ['*.mp4'],
             maxCachedRanges: 0,
         });
 

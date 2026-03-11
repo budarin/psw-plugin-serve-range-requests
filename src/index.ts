@@ -1,9 +1,13 @@
 import type {
     FetchResponse,
+    Logger,
     PluginContext,
     ServiceWorkerPlugin,
 } from '@budarin/pluggable-serviceworker';
-import { matchByUrl } from '@budarin/pluggable-serviceworker/utils';
+import {
+    matchByUrl,
+    normalizeUrl,
+} from '@budarin/pluggable-serviceworker/utils';
 
 import { HEADER_RANGE } from '@budarin/http-constants/headers';
 import { HTTP_STATUS_PARTIAL_CONTENT } from '@budarin/http-constants/statuses';
@@ -11,8 +15,8 @@ import { HTTP_STATUS_PARTIAL_CONTENT } from '@budarin/http-constants/statuses';
 import type {
     CachedRange,
     FileMetadata,
+    Pathname,
     RangeCacheKey,
-    UrlString,
 } from './types.js';
 import {
     createRangeSlotManager,
@@ -22,8 +26,11 @@ import {
 import { startRestore, type RestoreOptions } from './restore.js';
 import { serveRangeFromCachedResponse } from './serveFromCache.js';
 import {
+    type NormalizedIncludeExclude,
     type Range,
     getRangeRequestSource,
+    normalizeIncludeExclude,
+    parseUrlSafely,
     shouldCacheRange,
     shouldProcessFile,
 } from './rangeUtils.js';
@@ -117,28 +124,30 @@ interface RangeHandlerContext {
     cacheName: string;
     enableLogging: boolean;
     rangeResponseCacheControl: string | undefined;
-    restoreInProgress: Set<UrlString>;
-    fileMetadataCache: Map<UrlString, FileMetadata>;
+    restoreInProgress: Set<Pathname>;
+    fileMetadataCache: Map<Pathname, FileMetadata>;
     restoreMissingToCache: boolean;
-    /** Если задан — restore только для запросов, чей pathname есть в списке (в Set — pathname'ы). */
-    assetUrls: Set<UrlString> | undefined;
+    /** Если задан — restore только для запросов, чей pathname есть в списке. */
+    assetUrls: Set<Pathname> | undefined;
     restoreOptions: RestoreOptions;
-    acquireRangeSlot: (url: UrlString) => Promise<(() => void) | null>;
+    acquireRangeSlot: (pathname: Pathname) => Promise<(() => void) | null>;
     mergeAbortSignals: (...s: AbortSignal[]) => AbortSignal;
-    getOrCreateUrlState: (url: UrlString) => UrlState;
+    getOrCreateUrlState: (pathname: Pathname) => UrlState;
     prioritizeLatestRequest: boolean;
-    matchByUrl: (
+    /** Поиск в кэше по pathname (через normalizeUrl — origin текущего scope). */
+    matchByPathname: (
         cache: Cache,
-        request: Request
+        pathname: Pathname
     ) => Promise<Response | undefined>;
     invalidateCache: () => void;
     /**
-     * По clientId — URL, по которым уже отдавали из сети в этой вкладке.
-     * После restore ETag в кэше = ETag сервера, getRangeRequestSource не отличит — нужен явный учёт.
+     * По clientId — pathname'ы, по которым уже отдавали из сети в этой вкладке.
      */
-    urlsServedFromNetworkByClient: Map<string, Set<UrlString>>;
+    urlsServedFromNetworkByClient: Map<string, Set<Pathname>>;
     clientId: string;
     maxTrackedUrls: number;
+    /** Логгер из контракта плагина (context.logger). */
+    logger?: Logger | undefined;
 }
 
 /** Результат успешной попытки ответа из полного кэша. */
@@ -158,11 +167,24 @@ interface TryFullCacheResult {
  * в кэше совпадает с сетевым, getRangeRequestSource не отличит; (2) иначе — getRangeRequestSource()
  * по If-Range и ETag/Last-Modified кэша вернул 'network'. После перезагрузки clientId новый — кэш используется.
  *
+ * Обрабатываются только запросы из браузера (вкладка, контролируемый контекст). Запросы без clientId
+ * (например инициированные самим SW) пропускаются — возвращаем undefined, дальше по цепочке.
+ *
  * @param options - Опции конфигурации плагина
  * @returns ServiceWorkerPlugin для обработки Range запросов
  * @see https://bugs.chromium.org/p/chromium/issues/detail?id=1026867
  * @see https://phoboslab.org/files/bugs/chrome-serviceworker-video/
  */
+
+/** Origin SW (один на весь модуль, кешируется при первом обращении). */
+let cachedScopeOrigin: string | null = null;
+
+function throwIfAborted(signal: AbortSignal): void {
+    if (signal.aborted) {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+    }
+}
+
 export function serveRangeRequests(
     options: RangePluginOptions
 ): ServiceWorkerPlugin {
@@ -172,8 +194,8 @@ export function serveRangeRequests(
         maxCachedRanges = 100,
         maxCacheableRangeSize = 10 * 1024 * 1024, // 10MB
         enableLogging = false,
-        include,
-        exclude,
+        include: rawInclude,
+        exclude: rawExclude,
         rangeResponseCacheControl,
         maxConcurrentRangesPerUrl = 4,
         prioritizeLatestRequest = true,
@@ -182,18 +204,37 @@ export function serveRangeRequests(
         assets,
     } = options;
 
-    const assetUrlsSet = assets ? new Set<UrlString>(assets) : undefined;
+    if (
+        rawInclude == null ||
+        !Array.isArray(rawInclude) ||
+        rawInclude.length === 0
+    ) {
+        throw new Error(
+            'serveRangeRequests: include is required and must be a non-empty array'
+        );
+    }
 
-    // Кеш для range-ответов (LRU через Map)
+    /** Нормализация include/exclude один раз при первом fetch (scope в SW не меняется). */
+    let normalizedIncludeExclude: NormalizedIncludeExclude | null = null;
+    /** Варнинг о пустом include после нормализации логируем один раз. */
+    let emptyIncludeWarned = false;
+
+    const assetUrlsSet = assets ? new Set<Pathname>(assets) : undefined;
+
+    // Кеш для range-ответов (LRU через Map). Ключ — pathname|rangeHeader.
     const rangeCache = new Map<RangeCacheKey, CachedRange>();
-    // Кеш метаданных файлов
-    const fileMetadataCache = new Map<UrlString, FileMetadata>();
+    // Кеш метаданных файлов по pathname
+    const fileMetadataCache = new Map<Pathname, FileMetadata>();
     // Кеш для Cache API объектов
     let cacheInstance: Cache | null = null;
-    /** URL, по которым идёт восстановление в кеш (чтобы не дублировать) */
-    const restoreInProgress = new Set<UrlString>();
-    /** По clientId — URL, по которым уже отдавали из сети (passthrough) в этой вкладке. После reload clientId новый — кэш используется. */
-    const urlsServedFromNetworkByClient = new Map<string, Set<UrlString>>();
+    /** Pathname'ы, по которым идёт восстановление в кеш (чтобы не дублировать) */
+    const restoreInProgress = new Set<Pathname>();
+    /**
+     * По clientId — pathname'ы, по которым этому клиенту уже отдавали ответ из сети (passthrough).
+     * Чтобы не переключать источник на кеш для последующих range-запросов (обход бага Chromium).
+     * Ключи при закрытии вкладки не удаляются — число ключей может расти.
+     */
+    const urlsServedFromNetworkByClient = new Map<string, Set<Pathname>>();
 
     const { acquireRangeSlot, getOrCreateUrlState } = createRangeSlotManager({
         maxConcurrentRangesPerUrl,
@@ -215,7 +256,8 @@ export function serveRangeRequests(
         mergeAbortSignals,
         getOrCreateUrlState,
         prioritizeLatestRequest,
-        matchByUrl,
+        matchByPathname: (cache: Cache, pathname: Pathname) =>
+            matchByUrl(cache, new Request(normalizeUrl(pathname))),
         invalidateCache: () => {
             cacheInstance = null;
         },
@@ -243,7 +285,7 @@ export function serveRangeRequests(
      * Ограничивает размер кеша метаданных: вытесняется запись, вставленная раньше всех (FIFO).
      * Лимит = maxCachedRanges.
      */
-    function manageMetadataCacheSize(): void {
+    function manageMetadataCacheSize(logger?: Logger): void {
         if (maxCachedRanges <= 0) {
             return;
         }
@@ -252,9 +294,7 @@ export function serveRangeRequests(
             if (firstKey) {
                 fileMetadataCache.delete(firstKey);
                 if (enableLogging) {
-                    console.log(
-                        `Metadata cache: removed old entry ${firstKey}`
-                    );
+                    logger?.debug?.(`Metadata cache: removed old entry ${firstKey}`);
                 }
             }
         }
@@ -276,7 +316,7 @@ export function serveRangeRequests(
     /**
      * Освобождает место в rangeCache при достижении лимита (FIFO — вытесняется самый старый).
      */
-    function evictOneRangeCacheEntry(): void {
+    function evictOneRangeCacheEntry(logger?: Logger): void {
         if (maxCachedRanges <= 0 || rangeCache.size < maxCachedRanges) {
             return;
         }
@@ -284,7 +324,7 @@ export function serveRangeRequests(
         if (firstKey) {
             rangeCache.delete(firstKey);
             if (enableLogging) {
-                console.log(
+                logger?.debug?.(
                     `Range cache: evicted ${firstKey} (limit ${maxCachedRanges})`
                 );
             }
@@ -292,12 +332,12 @@ export function serveRangeRequests(
     }
 
     /**
-     * Пытается отдать диапазон из закешированного полного файла: слот, matchByUrl, restore при промахе, serveRangeFromCachedResponse.
-     * При промахе возвращает network fetch(original request), иначе TryFullCacheResult или undefined.
+     * Пытается отдать диапазон из закешированного полного файла: слот, matchByPathname (по pathname через normalizeUrl), restore при промахе, serveRangeFromCachedResponse.
+     * Внутри работа по pathname; request — только для fetch при промахе.
      */
     async function tryServeRangeFromCachedFile(
         request: Request,
-        url: UrlString,
+        pathname: Pathname,
         rangeHeader: string,
         signal: AbortSignal,
         requestAbortController: AbortController,
@@ -305,7 +345,7 @@ export function serveRangeRequests(
         ctx: RangeHandlerContext
     ): Promise<TryFullCacheResult | Response | undefined> {
         const release = await Promise.race([
-            ctx.acquireRangeSlot(url),
+            ctx.acquireRangeSlot(pathname),
             abortPromise.then(() => undefined),
         ]);
         if (!release) return undefined;
@@ -314,7 +354,7 @@ export function serveRangeRequests(
             ? ctx.mergeAbortSignals(
                   signal,
                   requestAbortController.signal,
-                  ctx.getOrCreateUrlState(url).abortController.signal
+                  ctx.getOrCreateUrlState(pathname).abortController.signal
               )
             : ctx.mergeAbortSignals(signal, requestAbortController.signal);
 
@@ -327,7 +367,7 @@ export function serveRangeRequests(
             let cachedResponse: Response | undefined;
             try {
                 cachedResponse = await Promise.race([
-                    ctx.matchByUrl(cache, request),
+                    ctx.matchByPathname(cache, pathname),
                     new Promise<never>((_, reject) => {
                         workSignal.addEventListener(
                             'abort',
@@ -350,59 +390,48 @@ export function serveRangeRequests(
                     return undefined;
                 }
                 ctx.invalidateCache();
-                if (ctx.enableLogging) {
-                    console.error(
-                        'serveRangeRequests plugin: matchByUrl failed',
-                        matchError
-                    );
-                }
+                ctx.logger?.error?.(
+                    'serveRangeRequests plugin: matchByPathname failed',
+                    matchError
+                );
                 return undefined;
             }
             if (ctx.enableLogging) {
-                console.log(
-                    `serveRangeRequests plugin: matchByUrl cacheName=${ctx.cacheName} request.url=${request.url} result=${cachedResponse ? 'found' : 'null'}`
+                ctx.logger?.debug?.(
+                    `serveRangeRequests plugin: matchByPathname cacheName=${ctx.cacheName} pathname=${pathname} result=${cachedResponse ? 'found' : 'null'}`
                 );
             }
 
             if (!cachedResponse) {
                 let setForClient = ctx.urlsServedFromNetworkByClient.get(ctx.clientId);
                 if (!setForClient) {
-                    setForClient = new Set<UrlString>();
+                    setForClient = new Set<Pathname>();
                     ctx.urlsServedFromNetworkByClient.set(ctx.clientId, setForClient);
                 }
                 if (setForClient.size >= ctx.maxTrackedUrls) {
                     const first = setForClient.values().next().value;
                     if (first !== undefined) setForClient.delete(first);
                 }
-                setForClient.add(url);
+                setForClient.add(pathname);
 
-                let urlInAssets = false;
-                if (ctx.assetUrls) {
-                    try {
-                        urlInAssets = ctx.assetUrls.has(new URL(url).pathname);
-                    } catch {
-                        urlInAssets = false;
-                    }
-                }
+                const urlInAssets = ctx.assetUrls?.has(pathname) ?? false;
                 if (ctx.restoreMissingToCache && urlInAssets) {
-                    startRestore(url, ctx.restoreOptions);
+                    startRestore(request.url, ctx.restoreOptions);
                 }
                 if (ctx.enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: skipping ${url} (file not in cache), returning passthrough response`
+                    ctx.logger?.debug?.(
+                        `serveRangeRequests plugin: skipping ${pathname} (file not in cache), returning passthrough response`
                     );
                 }
-                // На промахе не меняем параметры запроса: отдаём сетью "родной" request браузера,
-                // чтобы не потерять Range и не получить 200 вместо 206.
                 return await fetch(request);
             }
             if (workSignal.aborted) return undefined;
 
             const setForClient = ctx.urlsServedFromNetworkByClient.get(ctx.clientId);
-            if (setForClient?.has(url)) {
+            if (setForClient?.has(pathname)) {
                 if (ctx.enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: ${url} already served from network for this client, passthrough (Chromium bug workaround)`
+                    ctx.logger?.debug?.(
+                        `serveRangeRequests plugin: ${pathname} already served from network for this client, passthrough (Chromium bug workaround)`
                     );
                 }
                 return await fetch(request);
@@ -411,8 +440,8 @@ export function serveRangeRequests(
             const cachedMetadata = extractMetadataFromResponse(cachedResponse);
             if (cachedMetadata && getRangeRequestSource(request, cachedMetadata) === 'network') {
                 if (ctx.enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: ${url} client has network validator (If-Range), passthrough (Chromium bug workaround)`
+                    ctx.logger?.debug?.(
+                        `serveRangeRequests plugin: ${pathname} client has network validator (If-Range), passthrough (Chromium bug workaround)`
                     );
                 }
                 return await fetch(request);
@@ -424,11 +453,12 @@ export function serveRangeRequests(
                 rangeHeader,
                 workSignal,
                 {
-                    url,
+                    pathname,
                     rangeResponseCacheControl: ctx.rangeResponseCacheControl,
                     enableLogging: ctx.enableLogging,
                     fileMetadataCache: ctx.fileMetadataCache,
                     precomputedMetadata: cachedMetadata ?? undefined,
+                    logger: ctx.logger,
                 }
             );
             return serveResult;
@@ -442,9 +472,9 @@ export function serveRangeRequests(
             if (!isAbort) {
                 ctx.invalidateCache();
             }
-            if (!isAbort && ctx.enableLogging) {
-                console.error(
-                    `serveRangeRequests plugin error for ${url} with range ${rangeHeader}:`,
+            if (!isAbort) {
+                ctx.logger?.error?.(
+                    `serveRangeRequests plugin error for ${pathname} with range ${rangeHeader}:`,
                     error
                 );
             }
@@ -478,36 +508,75 @@ export function serveRangeRequests(
                 return;
             }
 
+            // Только запросы из браузера (clientId есть); запросы из SW или без клиента не обрабатываем
+            if (!event.clientId) {
+                context.logger?.warn?.(
+                    'serveRangeRequests plugin: skipping request without clientId (not from browser)',
+                    request.url
+                );
+                return;
+            }
+
             const signal = request.signal;
 
             if (signal.aborted) {
                 if (enableLogging) {
-                    console.log(
+                    context.logger?.debug?.(
                         `serveRangeRequests plugin: abort handling for ${request.url} (signal already aborted)`
                     );
                 }
-
-                throw new DOMException(
-                    'The operation was aborted.',
-                    'AbortError'
-                );
+                throwIfAborted(signal);
             }
 
-            // Проверяем, должен ли файл обрабатываться на основе include/exclude масок
-            if (!shouldProcessFile(request.url, include, exclude)) {
-                if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: skipping ${request.url} (filtered out by include/exclude rules)`
+            if (cachedScopeOrigin === null) {
+                cachedScopeOrigin = new URL(self.registration.scope).origin;
+            }
+            const scopeOrigin = cachedScopeOrigin;
+            if (normalizedIncludeExclude === null) {
+                normalizedIncludeExclude = normalizeIncludeExclude(
+                    rawInclude,
+                    rawExclude,
+                    scopeOrigin
+                );
+                if (normalizedIncludeExclude.include.length === 0 && !emptyIncludeWarned) {
+                    emptyIncludeWarned = true;
+                    context.logger?.warn?.(
+                        'serveRangeRequests: include is empty after filtering (all cross-origin), plugin will not process range requests'
                     );
                 }
-
+            }
+            const { include, exclude, sameOriginOnly } = normalizedIncludeExclude;
+            if (include.length === 0) {
                 return;
             }
 
-            const url: UrlString = request.url;
+            const requestUrl = parseUrlSafely(request.url);
+            if (requestUrl === null) {
+                context.logger?.warn?.(
+                    'serveRangeRequests plugin: invalid request URL, skipping',
+                    request.url
+                );
+                return;
+            }
+            // При заданных include/exclude обрабатываем только same-origin; сторонние URL — варнинг и пропуск
+            if (sameOriginOnly && requestUrl.origin !== scopeOrigin) {
+                context.logger?.warn?.(
+                    `serveRangeRequests plugin: skipping third-party resource (include/exclude set, same-origin only): ${requestUrl.pathname}`
+                );
+                return;
+            }
+
+            if (!shouldProcessFile(requestUrl.pathname, include, exclude)) {
+                context.logger?.warn?.(
+                    `serveRangeRequests plugin: skipping (filtered out by include/exclude): ${requestUrl.pathname}`
+                );
+                return;
+            }
+
+            const pathname: Pathname = requestUrl.pathname;
 
             const cacheKey: RangeCacheKey | undefined =
-                maxCachedRanges > 0 ? `${url}|${rangeHeader}` : undefined;
+                maxCachedRanges > 0 ? `${pathname}|${rangeHeader}` : undefined;
 
             // Проверяем кеш range-ответов (с LRU обновлением) только при включённом кеше
             const cachedRange =
@@ -517,8 +586,8 @@ export function serveRangeRequests(
                 const { data, headers } = cachedRange;
 
                 if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: returning 206 from range cache for ${url} data.byteLength=${data.byteLength}`
+                    context.logger?.debug?.(
+                        `serveRangeRequests plugin: returning 206 from range cache for ${pathname} data.byteLength=${data.byteLength}`
                     );
                 }
 
@@ -535,12 +604,14 @@ export function serveRangeRequests(
                 enableLogging,
                 cacheName,
                 restoreInProgress,
+                logger: context.logger,
             };
             const clientId = event.clientId ?? '';
             const handlerContext: RangeHandlerContext = {
                 ...baseHandlerContext,
                 restoreOptions,
                 clientId,
+                logger: context.logger,
             };
 
             try {
@@ -559,7 +630,7 @@ export function serveRangeRequests(
                 const result = await Promise.race([
                     tryServeRangeFromCachedFile(
                         request,
-                        url,
+                        pathname,
                         rangeHeader,
                         signal,
                         requestAbortController,
@@ -570,12 +641,7 @@ export function serveRangeRequests(
                 ]);
 
                 if (!result) {
-                    if (signal.aborted) {
-                        throw new DOMException(
-                            'The operation was aborted.',
-                            'AbortError'
-                        );
-                    }
+                    throwIfAborted(signal);
                     return;
                 }
 
@@ -586,20 +652,20 @@ export function serveRangeRequests(
                 const { stream, headers, range } = result;
                 const rangeSize = range.end - range.start + 1;
 
-                manageMetadataCacheSize();
-                fileMetadataCache.set(url, result.metadata);
+                manageMetadataCacheSize(context.logger);
+                fileMetadataCache.set(pathname, result.metadata);
 
                 const shouldCache =
                     maxCachedRanges > 0 &&
                     shouldCacheRange(range, maxCacheableRangeSize);
 
                 if (shouldCache && cacheKey !== undefined) {
-                    evictOneRangeCacheEntry();
+                    evictOneRangeCacheEntry(context.logger);
                     const data = await new Response(stream).arrayBuffer();
                     rangeCache.set(cacheKey, { data, headers });
                     if (enableLogging) {
-                        console.log(
-                            `serveRangeRequests plugin: returning 206 for ${url} range size: ${rangeSize} bytes (cached)`
+                        context.logger?.debug?.(
+                            `serveRangeRequests plugin: returning 206 for ${pathname} range size: ${rangeSize} bytes (cached)`
                         );
                     }
                     return new Response(data, {
@@ -609,8 +675,8 @@ export function serveRangeRequests(
                 }
 
                 if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: returning 206 for ${url} range size: ${rangeSize} bytes`
+                    context.logger?.debug?.(
+                        `serveRangeRequests plugin: returning 206 for ${pathname} range size: ${rangeSize} bytes`
                     );
                 }
                 return new Response(stream, {
@@ -620,16 +686,11 @@ export function serveRangeRequests(
             } catch (err) {
                 // Любое исключение (getCache, acquireRangeSlot и т.д.) не должно ломать цепочку:
                 // возвращаем undefined, чтобы Range обработал следующий плагин/сеть.
-                if (signal.aborted) {
-                    throw new DOMException(
-                        'The operation was aborted.',
-                        'AbortError'
-                    );
-                }
+                throwIfAborted(signal);
 
                 if (enableLogging) {
-                    console.error(
-                        `serveRangeRequests plugin: unexpected error for ${url}, returning undefined to allow passthrough:`,
+                    context.logger?.error?.(
+                        `serveRangeRequests plugin: unexpected error for ${pathname}, returning undefined to allow passthrough:`,
                         err
                     );
                 }

@@ -6,6 +6,9 @@ import {
     shouldCacheRange,
     matchesGlob,
     shouldProcessFile,
+    normalizeToPathname,
+    isGlobPattern,
+    normalizeIncludeExclude,
 } from '../src/rangeUtils.js';
 
 describe('parseRangeHeader', () => {
@@ -200,8 +203,9 @@ describe('matchesGlob', () => {
 describe('shouldProcessFile', () => {
     const url = 'https://example.com/media/video.mp4';
 
-    it('без include и exclude — true', () => {
-        expect(shouldProcessFile(url)).toBe(true);
+    it('без include или пустой include — false', () => {
+        expect(shouldProcessFile(url)).toBe(false);
+        expect(shouldProcessFile(url, [])).toBe(false);
     });
 
     it('include: совпадение — true', () => {
@@ -220,9 +224,9 @@ describe('shouldProcessFile', () => {
         ).toBe(false);
     });
 
-    it('exclude: нет совпадения — true', () => {
+    it('exclude: нет совпадения, есть include — true', () => {
         expect(
-            shouldProcessFile(url, undefined, ['*.mp3'])
+            shouldProcessFile(url, ['*.mp4'], ['*.mp3'])
         ).toBe(true);
     });
 
@@ -230,5 +234,79 @@ describe('shouldProcessFile', () => {
         expect(
             shouldProcessFile(url, ['*.mp4'], ['*.mp4'])
         ).toBe(false);
+    });
+});
+
+describe('normalizeToPathname', () => {
+    it('URL с протоколом → pathname', () => {
+        expect(normalizeToPathname('https://example.com/videos/a.mp4')).toBe(
+            '/videos/a.mp4'
+        );
+        expect(normalizeToPathname('http://cdn.org/asset.mp4')).toBe('/asset.mp4');
+    });
+    it('protocol-relative URL (//host/path) → pathname', () => {
+        expect(normalizeToPathname('//cdn.example.com/assets/video.mp4')).toBe(
+            '/assets/video.mp4'
+        );
+    });
+    it('path или glob без :// — без изменений', () => {
+        expect(normalizeToPathname('/videos/a.mp4')).toBe('/videos/a.mp4');
+        expect(normalizeToPathname('*.mp4')).toBe('*.mp4');
+        expect(normalizeToPathname('/tiles/*')).toBe('/tiles/*');
+    });
+});
+
+describe('isGlobPattern', () => {
+    it('* или ? — true', () => {
+        expect(isGlobPattern('*.mp4')).toBe(true);
+        expect(isGlobPattern('/tiles/*')).toBe(true);
+        expect(isGlobPattern('file?.mp4')).toBe(true);
+    });
+    it('литеральный path — false', () => {
+        expect(isGlobPattern('/videos/intro.mp4')).toBe(false);
+        expect(isGlobPattern('/asset')).toBe(false);
+    });
+});
+
+describe('normalizeIncludeExclude', () => {
+    it('приводит URL к pathname', () => {
+        const r = normalizeIncludeExclude(
+            ['https://example.com/videos/*.mp4'],
+            ['https://cdn.com/static/*']
+        );
+        expect(r.include).toEqual(['/videos/*.mp4']);
+        expect(r.exclude).toEqual(['/static/*']);
+    });
+    it('не-глобы без ведущего / получают ведущий /', () => {
+        const r = normalizeIncludeExclude(
+            ['videos/intro.mp4', '*.mp4'],
+            ['static/skip']
+        );
+        expect(r.include).toEqual(['/videos/intro.mp4', '*.mp4']);
+        expect(r.exclude).toEqual(['/static/skip']);
+    });
+    it('sameOriginOnly при любых include/exclude (глобы или нет)', () => {
+        expect(
+            normalizeIncludeExclude(['/videos/intro.mp4'], []).sameOriginOnly
+        ).toBe(true);
+        expect(
+            normalizeIncludeExclude(['*.mp4'], ['/skip/this']).sameOriginOnly
+        ).toBe(true);
+        expect(
+            normalizeIncludeExclude(['*.mp4'], ['*.json']).sameOriginOnly
+        ).toBe(true);
+        expect(normalizeIncludeExclude(undefined, undefined).sameOriginOnly).toBe(
+            false
+        );
+    });
+    it('при scopeOrigin отбрасывает URL другого домена', () => {
+        const scopeOrigin = 'https://example.com';
+        const r = normalizeIncludeExclude(
+            ['https://example.com/videos/a.mp4', 'https://other.com/left.mp4', '/local'],
+            ['https://example.com/skip', 'https://cdn.evil.com/exclude'],
+            scopeOrigin
+        );
+        expect(r.include).toEqual(['/videos/a.mp4', '/local']);
+        expect(r.exclude).toEqual(['/skip']);
     });
 });

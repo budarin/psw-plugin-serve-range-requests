@@ -2,8 +2,11 @@
  * Семантические алиасы для строковых типов (URL, заголовки, ключи кеша).
  */
 
-/** URL ресурса (request.url, ключ кеша по URL). */
+/** URL ресурса (request.url, fetch/cache). */
 export type UrlString = string;
+
+/** Pathname ресурса (путь без origin); вся внутренняя работа плагина — по pathname. */
+export type Pathname = string;
 
 /** Значение заголовка Range (например, "bytes=0-1023"). */
 export type RangeHeaderValue = string;

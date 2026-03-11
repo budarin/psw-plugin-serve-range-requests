@@ -1,9 +1,26 @@
+import type { Logger } from '@budarin/pluggable-serviceworker';
+
 import type { GlobPattern, RangeHeaderValue, UrlString } from './types.js';
 
 /**
  * Чистые функции для парсинга Range, проверки If-Range, glob и кеширования.
  * Вынесены для unit-тестов.
  */
+
+/**
+ * Безопасный парсинг URL: URL.parse когда доступен, иначе try/catch.
+ * При полном переходе на URL.parse убрать fallback в одном месте.
+ */
+export function parseUrlSafely(url: string): URL | null {
+    if (typeof URL.parse === 'function') {
+        return URL.parse(url);
+    }
+    try {
+        return new URL(url);
+    } catch {
+        return null;
+    }
+}
 
 /** Кеш скомпилированных RegExp по glob-паттерну (избегаем повторной компиляции). */
 const globRegexCache = new Map<GlobPattern, RegExp>();
@@ -111,14 +128,15 @@ export function ifRangeMatches(
         const ifRangeDate = Date.parse(value);
         if (!Number.isNaN(ifRangeDate)) {
             const storedDate = Date.parse(metadata.lastModified);
-            return (
-                !Number.isNaN(storedDate) && ifRangeDate === storedDate
-            );
+            return !Number.isNaN(storedDate) && ifRangeDate === storedDate;
         }
     }
     if (metadata.etag) {
         const normalizeEtag = (s: string) =>
-            s.replace(/^\s*W\//i, '').replace(/^"|"$/g, '').trim();
+            s
+                .replace(/^\s*W\//i, '')
+                .replace(/^"|"$/g, '')
+                .trim();
         return normalizeEtag(value) === normalizeEtag(metadata.etag);
     }
     return false;
@@ -133,6 +151,93 @@ export function shouldCacheRange(
 ): boolean {
     const rangeSize = range.end - range.start + 1;
     return rangeSize <= maxCacheableRangeSize;
+}
+
+/**
+ * Приводит запись include/exclude к pathname. В include/exclude часто передают URL ресурсов,
+ * а не глобы — их нормализуем так, чтобы в итоге оставались pathname'ы, а не URL.
+ * URL с протоколом (https://...) и protocol-relative (//host/...) → pathname; остальное — как есть.
+ */
+export function normalizeToPathname(entry: string): string {
+    const trimmed = entry.trim();
+    if (trimmed.includes('://')) {
+        try {
+            return new URL(trimmed).pathname;
+        } catch {
+            return trimmed;
+        }
+    }
+    if (trimmed.startsWith('//')) {
+        try {
+            return new URL(`https:${trimmed}`).pathname;
+        } catch {
+            return trimmed;
+        }
+    }
+    return trimmed;
+}
+
+/**
+ * true, если паттерн содержит символы glob (* или ?).
+ */
+export function isGlobPattern(pattern: string): boolean {
+    return pattern.includes('*') || pattern.includes('?');
+}
+
+export interface NormalizedIncludeExclude {
+    include: string[];
+    exclude: string[];
+    /** true, если заданы include или exclude — обрабатываем только same-origin, сторонние URL отсекаем. */
+    sameOriginOnly: boolean;
+}
+
+/**
+ * Все не-глобы должны быть pathname (начинаться с /). Глобы оставляем как есть.
+ */
+function ensurePathname(entry: string): string {
+    if (isGlobPattern(entry)) return entry;
+    if (entry.startsWith('/')) return entry;
+    return `/${entry}`;
+}
+
+function isFullUrl(entry: string): boolean {
+    const t = entry.trim();
+    return t.includes('://') || t.startsWith('//');
+}
+
+function getOriginOfEntry(entry: string): string | undefined {
+    const t = entry.trim();
+    try {
+        if (t.includes('://')) return new URL(t).origin;
+        if (t.startsWith('//')) return new URL(`https:${t}`).origin;
+    } catch {
+        return undefined;
+    }
+    return undefined;
+}
+
+/**
+ * Нормализует элементы include/exclude. При переданном scopeOrigin полные URL
+ * другого домена отбрасываются; pathname'ы, глобы и URL своего домена → pathname с ведущим /.
+ * sameOriginOnly = true, если после фильтрации остались элементы.
+ */
+export function normalizeIncludeExclude(
+    include?: string[],
+    exclude?: string[],
+    scopeOrigin?: string
+): NormalizedIncludeExclude {
+    const process = (entry: string): string | null => {
+        const t = entry.trim();
+        if (scopeOrigin && isFullUrl(t)) {
+            const entryOrigin = getOriginOfEntry(t);
+            if (entryOrigin !== undefined && entryOrigin !== scopeOrigin) return null;
+        }
+        return ensurePathname(normalizeToPathname(t));
+    };
+    const inc = (include ?? []).map(process).filter((x): x is string => x !== null);
+    const exc = (exclude ?? []).map(process).filter((x): x is string => x !== null);
+    const hasFilters = inc.length > 0 || exc.length > 0;
+    return { include: inc, exclude: exc, sameOriginOnly: hasFilters };
 }
 
 /**
@@ -152,16 +257,19 @@ export function matchesGlob(url: UrlString, pattern: GlobPattern): boolean {
 
 /**
  * Проверяет, должен ли файл обрабатываться на основе include/exclude масок.
+ * @param pathnameOrUrl — pathname (например /videos/a.mp4) или полный URL; при наличии '://' парсится как URL.
  */
 export function shouldProcessFile(
-    url: UrlString,
+    pathnameOrUrl: string,
     include?: GlobPattern[],
     exclude?: GlobPattern[]
 ): boolean {
-    if (!include?.length && !exclude?.length) {
-        return true;
+    if (include == null || include.length === 0) {
+        return false;
     }
-    const pathname = new URL(url, 'https://example.com').pathname;
+    const pathname = pathnameOrUrl.includes('://')
+        ? new URL(pathnameOrUrl).pathname
+        : pathnameOrUrl;
 
     if (exclude && exclude.length > 0) {
         for (const pattern of exclude) {
@@ -170,20 +278,18 @@ export function shouldProcessFile(
             }
         }
     }
-    if (include && include.length > 0) {
-        for (const pattern of include) {
-            if (matchesGlobByPath(pathname, pattern)) {
-                return true;
-            }
+    for (const pattern of include) {
+        if (matchesGlobByPath(pathname, pattern)) {
+            return true;
         }
-        return false;
     }
-    return true;
+    return false;
 }
 
 export interface CreateRangeStreamOptions {
     enableLogging?: boolean;
-    url?: string;
+    pathname?: string;
+    logger?: Logger | undefined;
 }
 
 /**
@@ -200,7 +306,7 @@ export function createRangeStream(
 ): ReadableStream<Uint8Array> {
     const reader = sourceStream.getReader();
     let position = 0;
-    const { enableLogging = false, url = '' } = options ?? {};
+    const { enableLogging = false, pathname = '', logger } = options ?? {};
 
     if (signal) {
         signal.addEventListener(
@@ -217,9 +323,9 @@ export function createRangeStream(
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             while (true) {
                 if (signal?.aborted) {
-                    if (enableLogging && url) {
-                        console.log(
-                            `serveRangeRequests plugin: range stream closed (abort) for ${url} bytes ${range.start}-${range.end}`
+                    if (enableLogging && pathname) {
+                        logger?.debug?.(
+                            `serveRangeRequests plugin: range stream closed (abort) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
                     controller.close();
@@ -229,9 +335,9 @@ export function createRangeStream(
                 try {
                     chunk = await reader.read();
                 } catch (readError) {
-                    if (enableLogging && url) {
-                        console.warn(
-                            `serveRangeRequests plugin: range stream closed (read error) for ${url} bytes ${range.start}-${range.end}:`,
+                    if (enableLogging && pathname) {
+                        logger?.warn?.(
+                            `serveRangeRequests plugin: range stream closed (read error) for ${pathname} bytes ${range.start}-${range.end}:`,
                             readError
                         );
                     }
@@ -240,9 +346,9 @@ export function createRangeStream(
                 }
                 const { done, value } = chunk;
                 if (done) {
-                    if (enableLogging && url) {
-                        console.log(
-                            `serveRangeRequests plugin: range stream finished (source done) for ${url} bytes ${range.start}-${range.end}`
+                    if (enableLogging && pathname) {
+                        logger?.debug?.(
+                            `serveRangeRequests plugin: range stream finished (source done) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
                     controller.close();
@@ -256,9 +362,9 @@ export function createRangeStream(
                     continue;
                 }
                 if (chunkStart > range.end) {
-                    if (enableLogging && url) {
-                        console.log(
-                            `serveRangeRequests plugin: range stream finished (range complete) for ${url} bytes ${range.start}-${range.end}`
+                    if (enableLogging && pathname) {
+                        logger?.debug?.(
+                            `serveRangeRequests plugin: range stream finished (range complete) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
                     controller.close();
@@ -274,9 +380,9 @@ export function createRangeStream(
             }
         },
         cancel(): void {
-            if (enableLogging && url) {
-                console.log(
-                    `serveRangeRequests plugin: range stream cancelled (consumer cancelled) for ${url} bytes ${range.start}-${range.end}`
+            if (enableLogging && pathname) {
+                logger?.debug?.(
+                    `serveRangeRequests plugin: range stream cancelled (consumer cancelled) for ${pathname} bytes ${range.start}-${range.end}`
                 );
             }
             reader.cancel().catch(() => {});

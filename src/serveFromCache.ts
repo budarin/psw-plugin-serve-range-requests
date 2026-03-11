@@ -1,10 +1,11 @@
+import type { Logger } from '@budarin/pluggable-serviceworker';
 import {
     HEADER_CONTENT_LENGTH,
     HEADER_ETAG,
     HEADER_LAST_MODIFIED,
 } from '@budarin/http-constants/headers';
 
-import type { FileMetadata, UrlString } from './types.js';
+import type { FileMetadata, Pathname } from './types.js';
 import {
     buildRangeResponseHeaders,
     extractMetadataFromResponse,
@@ -13,13 +14,14 @@ import type { Range } from './rangeUtils.js';
 import { createRangeStream, parseRangeHeader } from './rangeUtils.js';
 
 export interface ServeRangeFromCachedOptions {
-    url: UrlString;
+    pathname: Pathname;
     /** Не задано — заголовок Cache-Control для 206 не выставляется. */
     rangeResponseCacheControl?: string | undefined;
     enableLogging: boolean;
-    fileMetadataCache: Map<UrlString, FileMetadata>;
+    fileMetadataCache: Map<Pathname, FileMetadata>;
     /** Метаданные, уже извлечённые из cachedResponse (избегаем повторного парсинга заголовков). */
     precomputedMetadata?: FileMetadata | undefined;
+    logger?: Logger | undefined;
 }
 
 export interface ServeRangeResult {
@@ -42,14 +44,15 @@ export function serveRangeFromCachedResponse(
     options: ServeRangeFromCachedOptions
 ): ServeRangeResult | undefined {
     const {
-        url,
+        pathname,
         rangeResponseCacheControl,
         enableLogging,
         fileMetadataCache,
         precomputedMetadata,
+        logger,
     } = options;
 
-    let metadata = precomputedMetadata ?? fileMetadataCache.get(url);
+    let metadata = precomputedMetadata ?? fileMetadataCache.get(pathname);
     const fromCache = !precomputedMetadata && !!metadata;
     if (metadata && fromCache) {
         const contentLength = cachedResponse.headers.get(HEADER_CONTENT_LENGTH);
@@ -76,8 +79,8 @@ export function serveRangeFromCachedResponse(
     }
     if (!metadata) {
         if (enableLogging) {
-            console.log(
-                `serveRangeRequests plugin: skipping ${url} (no valid metadata)`
+            logger?.debug?.(
+                `serveRangeRequests plugin: skipping ${pathname} (no valid metadata)`
             );
         }
         return undefined;
@@ -85,16 +88,16 @@ export function serveRangeFromCachedResponse(
 
     // LRU: при использовании метаданных из кеша обновляем порядок (актуальная запись в конце)
     if (fromCache && metadata) {
-        fileMetadataCache.delete(url);
-        fileMetadataCache.set(url, metadata);
+        fileMetadataCache.delete(pathname);
+        fileMetadataCache.set(pathname, metadata);
     }
 
     const range = parseRangeHeader(rangeHeader, metadata.size);
 
     if (!cachedResponse.body) {
         if (enableLogging) {
-            console.log(
-                `serveRangeRequests plugin: skipping ${url} (cached response has no body)`
+            logger?.debug?.(
+                `serveRangeRequests plugin: skipping ${pathname} (cached response has no body)`
             );
         }
         return undefined;
@@ -106,7 +109,7 @@ export function serveRangeFromCachedResponse(
         cachedResponse.body,
         range,
         workSignal,
-        { enableLogging, url }
+        { enableLogging, pathname, logger }
     );
 
     const headers = buildRangeResponseHeaders(

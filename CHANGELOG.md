@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.35] - 2026-03-11
+
+### Added
+
+- **include required**: Plugin factory throws if `include` is null, not an array, or empty. After normalization (with scopeOrigin), if `include` is empty (all cross-origin filtered out), plugin logs a one-time warning and skips range handling instead of throwing.
+- **parseUrlSafely** in `rangeUtils`: safe URL parsing (URL.parse when available, else try/catch); returns URL or null. Used in fetch to avoid throwing on invalid request URL; invalid URL is logged and request is skipped.
+- **Module-level cachedScopeOrigin**: Origin from `self.registration.scope` is cached once per module (not per fetch), reused by all plugin instances.
+- **Requests without clientId skipped**: Fetch handler returns early when `event.clientId` is missing (e.g. requests from the SW itself); only browser-originated requests are processed. Warn logged; documented in JSDoc and reference.mdc.
+- **throwIfAborted(signal)**: Shared helper for abort handling; used in fetch instead of duplicating DOMException throw.
+- **Restore logging**: On restore failure (!response.ok) or catch, plugin logs via logger.warn (pathname, status or error).
+
+### Changed
+
+- **normalizeIncludeExclude**: Optional scopeOrigin; when provided, full URLs from other origins are filtered out. Normalization runs on first fetch (origin unknown at factory); result cached.
+- **shouldProcessFile**: First argument can be pathname or URL (pathname when no '://'); when called with pathname from handler, no URL parsing inside. Returns false when include is null or empty.
+- **Fetch handler**: Single requestUrl = parseUrlSafely(request.url); single scopeOrigin (cached); early exits for passthrough header, no Range, non-GET, no clientId, invalid URL, same-origin and include/exclude filters.
+- **urlsServedFromNetworkByClient**: Comment clarified — per-client pathnames already served from network; purpose (Chromium workaround); keys not removed when client closes.
+
 ## [1.0.34] - 2026-03-06
 
 ### Changed

@@ -1,6 +1,10 @@
-import { matchByUrl } from '@budarin/pluggable-serviceworker/utils';
+import type { Logger } from '@budarin/pluggable-serviceworker';
+import {
+    matchByUrl,
+    normalizeUrl,
+} from '@budarin/pluggable-serviceworker/utils';
 
-import type { UrlString } from './types.js';
+import type { Pathname, UrlString } from './types.js';
 
 export interface RestoreOptions {
     getCache: () => Promise<Cache>;
@@ -8,7 +12,8 @@ export interface RestoreOptions {
     fetchPassthrough: (request: Request) => Promise<Response>;
     enableLogging: boolean;
     cacheName: string;
-    restoreInProgress: Set<UrlString>;
+    restoreInProgress: Set<Pathname>;
+    logger?: Logger | undefined;
 }
 
 /**
@@ -23,22 +28,25 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
         enableLogging,
         cacheName,
         restoreInProgress,
+        logger,
     } = options;
 
-    if (restoreInProgress.has(url)) {
+    const pathname: Pathname = new URL(url).pathname;
+    if (restoreInProgress.has(pathname)) {
         return;
     }
 
-    restoreInProgress.add(url);
+    restoreInProgress.add(pathname);
 
     void (async (): Promise<void> => {
         try {
             const cache = await getCache();
 
-            if (await matchByUrl(cache, new Request(url))) {
+            const cacheRequestUrl = normalizeUrl(pathname);
+            if (await matchByUrl(cache, new Request(cacheRequestUrl))) {
                 if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: restore skipped for ${url} (already in cache)`
+                    logger?.debug?.(
+                        `serveRangeRequests plugin: restore skipped for ${pathname} (already in cache)`
                     );
                 }
                 return;
@@ -52,28 +60,35 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
             });
 
             if (enableLogging) {
-                console.log(
-                    `serveRangeRequests plugin: restore fetch for ${url} (full file, no Range)`
+                logger?.debug?.(
+                    `serveRangeRequests plugin: restore fetch for ${pathname} (full file, no Range)`
                 );
             }
 
             const response = await fetchPassthrough(fullRequest);
 
             if (response.ok) {
-                await cache.put(fullRequest, response);
+                await cache.put(new Request(cacheRequestUrl), response);
                 if (enableLogging) {
-                    console.log(
-                        `serveRangeRequests plugin: cache put done for ${url} cacheName=${cacheName}`
+                    logger?.debug?.(
+                        `serveRangeRequests plugin: cache put done for ${pathname} cacheName=${cacheName}`
                     );
                 }
+            } else {
+                logger?.warn?.(
+                    `serveRangeRequests plugin: restore failed for ${pathname} (response not ok) status=${response.status}`
+                );
             }
-        } catch {
-            // Игнорируем ошибки restore — следующий запрос попробует снова
+        } catch (error) {
+            logger?.warn?.(
+                `serveRangeRequests plugin: restore error for ${pathname}`,
+                error
+            );
         } finally {
-            restoreInProgress.delete(url);
+            restoreInProgress.delete(pathname);
             if (enableLogging) {
-                console.log(
-                    `serveRangeRequests plugin: restore finished for ${url}`
+                logger?.debug?.(
+                    `serveRangeRequests plugin: restore finished for ${pathname}`
                 );
             }
         }
