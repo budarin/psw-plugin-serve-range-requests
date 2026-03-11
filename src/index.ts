@@ -26,7 +26,6 @@ import {
 import { startRestore, type RestoreOptions } from './restore.js';
 import { serveRangeFromCachedResponse } from './serveFromCache.js';
 import {
-    type NormalizedIncludeExclude,
     type Range,
     getRangeRequestSource,
     normalizeIncludeExclude,
@@ -116,6 +115,12 @@ export interface RangePluginOptions {
      * вытесняются данные по файлам, по которым нет активных или ожидающих запросов. По умолчанию 512.
      */
     maxTrackedUrls?: number;
+    /**
+     * Опциональный логгер на уровне фабрики (инициализации). Используется только для init-логов
+     * (например, предупреждение при пустом include после фильтрации cross-origin URL).
+     * Runtime-логирование запросов — только через context.logger.
+     */
+    logger?: Logger;
 }
 
 /** Контекст для шагов обработчика: полный кэш, семафор, restore, инвалидация. */
@@ -202,6 +207,7 @@ export function serveRangeRequests(
         restoreMissingToCache = true,
         maxTrackedUrls = 512,
         assets,
+        logger = console,
     } = options;
 
     if (
@@ -214,10 +220,22 @@ export function serveRangeRequests(
         );
     }
 
-    /** Нормализация include/exclude один раз при первом fetch (scope в SW не меняется). */
-    let normalizedIncludeExclude: NormalizedIncludeExclude | null = null;
-    /** Варнинг о пустом include после нормализации логируем один раз. */
-    let emptyIncludeWarned = false;
+    // Нормализуем include/exclude сразу при инициализации SW (фабрика).
+    if (cachedScopeOrigin === null) {
+        cachedScopeOrigin = new URL(self.registration.scope).origin;
+    }
+    const scopeOrigin = cachedScopeOrigin;
+    const normalizedIncludeExclude = normalizeIncludeExclude(
+        rawInclude,
+        rawExclude,
+        scopeOrigin
+    );
+    const disabledByEmptyInclude = normalizedIncludeExclude.include.length === 0;
+    if (disabledByEmptyInclude) {
+        logger.warn(
+            'serveRangeRequests: include is empty after filtering (all cross-origin), plugin will not process range requests'
+        );
+    }
 
     const assetUrlsSet = assets ? new Set<Pathname>(assets) : undefined;
 
@@ -528,25 +546,8 @@ export function serveRangeRequests(
                 throwIfAborted(signal);
             }
 
-            if (cachedScopeOrigin === null) {
-                cachedScopeOrigin = new URL(self.registration.scope).origin;
-            }
-            const scopeOrigin = cachedScopeOrigin;
-            if (normalizedIncludeExclude === null) {
-                normalizedIncludeExclude = normalizeIncludeExclude(
-                    rawInclude,
-                    rawExclude,
-                    scopeOrigin
-                );
-                if (normalizedIncludeExclude.include.length === 0 && !emptyIncludeWarned) {
-                    emptyIncludeWarned = true;
-                    context.logger?.warn?.(
-                        'serveRangeRequests: include is empty after filtering (all cross-origin), plugin will not process range requests'
-                    );
-                }
-            }
             const { include, exclude, sameOriginOnly } = normalizedIncludeExclude;
-            if (include.length === 0) {
+            if (disabledByEmptyInclude) {
                 return;
             }
 

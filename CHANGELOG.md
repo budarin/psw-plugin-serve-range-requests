@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.36] - 2026-03-11
+
+### Changed
+
+- **Init normalization in factory**: `normalizeIncludeExclude(include, exclude, scopeOrigin)` now runs during plugin factory initialization (SW init), not on first fetch; the normalized result is stored in closure.
+- **Factory logger default**: `RangePluginOptions.logger` now defaults to `console`, mirroring `initServiceWorker` default logger behavior. Init-only warnings use this logger at factory time.
+
 ## [1.0.35] - 2026-03-11
 
 ### Added
