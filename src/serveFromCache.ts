@@ -12,6 +12,7 @@ import {
 } from './rangeResponse.js';
 import type { Range } from './rangeUtils.js';
 import { createRangeStream, parseRangeHeader } from './rangeUtils.js';
+import { SW_DEBUG_PREFIX } from './logging.js';
 
 export interface ServeRangeFromCachedOptions {
     pathname: Pathname;
@@ -80,7 +81,7 @@ export function serveRangeFromCachedResponse(
     if (!metadata) {
         if (enableLogging) {
             logger.debug(
-                `serveRangeRequests plugin: skipping ${pathname} (no valid metadata)`
+                `${SW_DEBUG_PREFIX} skipping ${pathname} (no valid metadata)`
             );
         }
         return undefined;
@@ -97,7 +98,7 @@ export function serveRangeFromCachedResponse(
     if (!cachedResponse.body) {
         if (enableLogging) {
             logger.debug(
-                `serveRangeRequests plugin: skipping ${pathname} (cached response has no body)`
+                `${SW_DEBUG_PREFIX} skipping ${pathname} (cached response has no body)`
             );
         }
         return undefined;

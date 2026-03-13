@@ -34,6 +34,7 @@ import {
     shouldProcessFile,
 } from './rangeUtils.js';
 import { extractMetadataFromResponse } from './rangeResponse.js';
+import { SW_DEBUG_PREFIX } from './logging.js';
 
 export {
     VIDEO_PRESET,
@@ -338,7 +339,9 @@ export function serveRangeRequests(
             if (firstKey) {
                 fileMetadataCache.delete(firstKey);
                 if (enableLogging) {
-                    logger.debug(`Metadata cache: removed old entry ${firstKey}`);
+                    logger.debug(
+                        `${SW_DEBUG_PREFIX} Metadata cache: removed old entry ${firstKey}`
+                    );
                 }
             }
         }
@@ -369,7 +372,7 @@ export function serveRangeRequests(
             rangeCache.delete(firstKey);
             if (enableLogging) {
                 logger.debug(
-                    `Range cache: evicted ${firstKey} (limit ${maxCachedRanges})`
+                    `${SW_DEBUG_PREFIX} Range cache: evicted ${firstKey} (limit ${maxCachedRanges})`
                 );
             }
         }
@@ -442,7 +445,7 @@ export function serveRangeRequests(
             }
             if (ctx.enableLogging) {
                 ctx.logger.debug(
-                    `serveRangeRequests plugin: matchByPathname cacheName=${ctx.cacheName} pathname=${pathname} result=${cachedResponse ? 'found' : 'null'}`
+                    `${SW_DEBUG_PREFIX} matchByPathname cacheName=${ctx.cacheName} pathname=${pathname} result=${cachedResponse ? 'found' : 'null'}`
                 );
             }
 
@@ -460,7 +463,7 @@ export function serveRangeRequests(
                 }
                 if (ctx.enableLogging) {
                     ctx.logger.debug(
-                        `serveRangeRequests plugin: skipping ${pathname} (file not in cache), returning passthrough response`
+                        `${SW_DEBUG_PREFIX} skipping ${pathname} (file not in cache), returning passthrough response`
                     );
                 }
                 return await fetch(request);
@@ -471,7 +474,7 @@ export function serveRangeRequests(
             if (setForClient?.has(pathname)) {
                 if (ctx.enableLogging) {
                     ctx.logger.debug(
-                        `serveRangeRequests plugin: ${pathname} already served from network for this client, passthrough (Chromium bug workaround)`
+                        `${SW_DEBUG_PREFIX} ${pathname} already served from network for this client, passthrough (Chromium bug workaround)`
                     );
                 }
                 return await fetch(request);
@@ -481,7 +484,7 @@ export function serveRangeRequests(
             if (cachedMetadata && getRangeRequestSource(request, cachedMetadata) === 'network') {
                 if (ctx.enableLogging) {
                     ctx.logger.debug(
-                        `serveRangeRequests plugin: ${pathname} client has network validator (If-Range), passthrough (Chromium bug workaround)`
+                        `${SW_DEBUG_PREFIX} ${pathname} client has network validator (If-Range), passthrough (Chromium bug workaround)`
                     );
                 }
                 return await fetch(request);
@@ -562,7 +565,7 @@ export function serveRangeRequests(
             if (signal.aborted) {
                 if (enableLogging) {
                     context.logger.debug(
-                        `serveRangeRequests plugin: abort handling for ${request.url} (signal already aborted)`
+                        `${SW_DEBUG_PREFIX} abort handling for ${request.url} (signal already aborted)`
                     );
                 }
                 throwIfAborted(signal);
@@ -610,7 +613,7 @@ export function serveRangeRequests(
 
                 if (enableLogging) {
                     context.logger.debug(
-                        `serveRangeRequests plugin: returning 206 from range cache for ${pathname} data.byteLength=${data.byteLength}`
+                        `${SW_DEBUG_PREFIX} returning 206 from range cache for ${pathname} data.byteLength=${data.byteLength}`
                     );
                 }
 
@@ -688,7 +691,7 @@ export function serveRangeRequests(
                     rangeCache.set(cacheKey, { data, headers });
                     if (enableLogging) {
                         context.logger.debug(
-                            `serveRangeRequests plugin: returning 206 for ${pathname} range size: ${rangeSize} bytes (cached)`
+                            `${SW_DEBUG_PREFIX} returning 206 for ${pathname} range size: ${rangeSize} bytes (cached)`
                         );
                     }
                     return new Response(data, {
@@ -699,7 +702,7 @@ export function serveRangeRequests(
 
                 if (enableLogging) {
                     context.logger.debug(
-                        `serveRangeRequests plugin: returning 206 for ${pathname} range size: ${rangeSize} bytes`
+                        `${SW_DEBUG_PREFIX} returning 206 for ${pathname} range size: ${rangeSize} bytes`
                     );
                 }
                 return new Response(stream, {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.41] - 2026-03-13
+
+### Changed
+
+- **Debug logging prefixes**: Introduced `logging.ts` with `PLUGIN_LOG_PREFIX` (`[cache-range]`) and `SW_DEBUG_PREFIX` / `CLIENT_DEBUG_PREFIX`. All debug logs in the Service Worker now use `[cache-range][sw] ...`, while warn/error messages keep their existing human-readable text without prefixes.
+- **URL matching helper**: `matchesGlob` now uses `parseUrlSafely` for URL parsing instead of hardcoded `'https://example.com'` as a base, removing test-only URL assumptions from production code while preserving existing behavior.
+
 ## [1.0.40] - 2026-03-13
 
 ### Changed

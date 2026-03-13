@@ -13,8 +13,10 @@ function createFetchEvent(request: Request, clientId = 'test-client'): FetchEven
     } as unknown as FetchEvent;
 }
 
+const TEST_ORIGIN = 'https://example.com';
+
 describe('serveRangeRequests — cache limits', () => {
-    const url = 'https://example.com/video.mp4';
+    const url = `${TEST_ORIGIN}/video.mp4`;
     const body = new Uint8Array(1000);
     const headers = new Headers({
         'Content-Length': '1000',
@@ -34,17 +36,16 @@ describe('serveRangeRequests — cache limits', () => {
 
     beforeEach(() => {
         // normalizeUrl(pathname) и scopeOrigin (same-origin) используют self.location / self.registration.scope
-        const origin = 'https://example.com';
-        const scope = `${origin}/`;
+        const scope = `${TEST_ORIGIN}/`;
         Object.defineProperty(globalThis, 'self', {
             value: {
-                location: { origin },
+                location: { origin: TEST_ORIGIN },
                 registration: { scope },
             },
             writable: true,
         });
         Object.defineProperty(globalThis, 'location', {
-            value: { origin },
+            value: { origin: TEST_ORIGIN },
             writable: true,
         });
         Object.defineProperty(globalThis, 'registration', {

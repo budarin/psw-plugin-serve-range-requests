@@ -11,6 +11,8 @@ import {
     normalizeIncludeExclude,
 } from '../src/rangeUtils.js';
 
+const TEST_ORIGIN = 'https://example.com';
+
 describe('parseRangeHeader', () => {
     const fullSize = 1000;
 
@@ -125,28 +127,28 @@ describe('getRangeRequestSource', () => {
     const cachedMetadata = { etag: '"cache-etag"', lastModified: 'Mon, 01 Jan 2024 00:00:00 GMT' };
 
     it('нет If-Range — cache (первый запрос или можно отдавать из кэша)', () => {
-        const request = new Request('https://example.com/video.mp4', {
+        const request = new Request(`${TEST_ORIGIN}/video.mp4`, {
             headers: { Range: 'bytes=0-1023' },
         });
         expect(getRangeRequestSource(request, cachedMetadata)).toBe('cache');
     });
 
     it('If-Range совпадает с кэшем — cache', () => {
-        const request = new Request('https://example.com/video.mp4', {
+        const request = new Request(`${TEST_ORIGIN}/video.mp4`, {
             headers: { Range: 'bytes=0-1023', 'If-Range': '"cache-etag"' },
         });
         expect(getRangeRequestSource(request, cachedMetadata)).toBe('cache');
     });
 
     it('If-Range не совпадает с кэшем — network (клиент от сетевого ответа)', () => {
-        const request = new Request('https://example.com/video.mp4', {
+        const request = new Request(`${TEST_ORIGIN}/video.mp4`, {
             headers: { Range: 'bytes=1024-2047', 'If-Range': '"server-etag"' },
         });
         expect(getRangeRequestSource(request, cachedMetadata)).toBe('network');
     });
 
     it('If-Range пустой — cache', () => {
-        const request = new Request('https://example.com/video.mp4', {
+        const request = new Request(`${TEST_ORIGIN}/video.mp4`, {
             headers: { Range: 'bytes=0-', 'If-Range': '   ' },
         });
         expect(getRangeRequestSource(request, cachedMetadata)).toBe('cache');
@@ -169,39 +171,27 @@ describe('shouldCacheRange', () => {
 
 describe('matchesGlob', () => {
     it('* совпадает с любым pathname', () => {
-        expect(matchesGlob('https://example.com/foo/bar.mp4', '*')).toBe(
-            true
-        );
-        expect(matchesGlob('https://example.com/bar', '/bar')).toBe(true);
+        expect(matchesGlob(`${TEST_ORIGIN}/foo/bar.mp4`, '*')).toBe(true);
+        expect(matchesGlob(`${TEST_ORIGIN}/bar`, '/bar')).toBe(true);
     });
 
     it('*.mp4 совпадает с pathname, оканчивающимся на .mp4', () => {
-        expect(
-            matchesGlob('https://example.com/video.mp4', '*.mp4')
-        ).toBe(true);
-        expect(
-            matchesGlob('https://example.com/path/video.mp4', '*.mp4')
-        ).toBe(true);
+        expect(matchesGlob(`${TEST_ORIGIN}/video.mp4`, '*.mp4')).toBe(true);
+        expect(matchesGlob(`${TEST_ORIGIN}/path/video.mp4`, '*.mp4')).toBe(true);
     });
 
     it('/tiles/* совпадает с path /tiles/...', () => {
-        expect(
-            matchesGlob('https://example.com/tiles/1/2/3', '/tiles/*')
-        ).toBe(true);
-        expect(
-            matchesGlob('https://example.com/tiles', '/tiles/*')
-        ).toBe(false);
+        expect(matchesGlob(`${TEST_ORIGIN}/tiles/1/2/3`, '/tiles/*')).toBe(true);
+        expect(matchesGlob(`${TEST_ORIGIN}/tiles`, '/tiles/*')).toBe(false);
     });
 
     it('pathname с ведущим слэшем для паттерна /videos/*.mp4', () => {
-        expect(
-            matchesGlob('https://example.com/videos/a.mp4', '/videos/*.mp4')
-        ).toBe(true);
+        expect(matchesGlob(`${TEST_ORIGIN}/videos/a.mp4`, '/videos/*.mp4')).toBe(true);
     });
 });
 
 describe('shouldProcessFile', () => {
-    const url = 'https://example.com/media/video.mp4';
+    const url = `${TEST_ORIGIN}/media/video.mp4`;
 
     it('без include или пустой include — false', () => {
         expect(shouldProcessFile(url)).toBe(false);
@@ -239,9 +229,7 @@ describe('shouldProcessFile', () => {
 
 describe('normalizeToPathname', () => {
     it('URL с протоколом → pathname', () => {
-        expect(normalizeToPathname('https://example.com/videos/a.mp4')).toBe(
-            '/videos/a.mp4'
-        );
+        expect(normalizeToPathname(`${TEST_ORIGIN}/videos/a.mp4`)).toBe('/videos/a.mp4');
         expect(normalizeToPathname('http://cdn.org/asset.mp4')).toBe('/asset.mp4');
     });
     it('protocol-relative URL (//host/path) → pathname', () => {
@@ -271,7 +259,7 @@ describe('isGlobPattern', () => {
 describe('normalizeIncludeExclude', () => {
     it('приводит URL к pathname', () => {
         const r = normalizeIncludeExclude(
-            ['https://example.com/videos/*.mp4'],
+            [`${TEST_ORIGIN}/videos/*.mp4`],
             ['https://cdn.com/static/*']
         );
         expect(r.include).toEqual(['/videos/*.mp4']);
@@ -300,11 +288,10 @@ describe('normalizeIncludeExclude', () => {
         );
     });
     it('при scopeOrigin отбрасывает URL другого домена', () => {
-        const scopeOrigin = 'https://example.com';
         const r = normalizeIncludeExclude(
-            ['https://example.com/videos/a.mp4', 'https://other.com/left.mp4', '/local'],
-            ['https://example.com/skip', 'https://cdn.evil.com/exclude'],
-            scopeOrigin
+            [`${TEST_ORIGIN}/videos/a.mp4`, 'https://other.com/left.mp4', '/local'],
+            [`${TEST_ORIGIN}/skip`, 'https://cdn.evil.com/exclude'],
+            TEST_ORIGIN
         );
         expect(r.include).toEqual(['/videos/a.mp4', '/local']);
         expect(r.exclude).toEqual(['/skip']);

@@ -1,5 +1,6 @@
 import type { Logger } from '@budarin/pluggable-serviceworker';
 
+import { SW_DEBUG_PREFIX } from './logging.js';
 import type { GlobPattern, RangeHeaderValue, UrlString } from './types.js';
 
 /**
@@ -251,7 +252,8 @@ function matchesGlobByPath(pathname: string, pattern: GlobPattern): boolean {
  * Проверяет, соответствует ли URL указанному glob-паттерну (по pathname).
  */
 export function matchesGlob(url: UrlString, pattern: GlobPattern): boolean {
-    const pathname = new URL(url, 'https://example.com').pathname;
+    const parsed = parseUrlSafely(url);
+    const pathname = parsed ? parsed.pathname : url;
     return matchesGlobByPath(pathname, pattern);
 }
 
@@ -325,7 +327,7 @@ export function createRangeStream(
                 if (signal?.aborted) {
                     if (enableLogging && pathname) {
                         logger.debug(
-                            `serveRangeRequests plugin: range stream closed (abort) for ${pathname} bytes ${range.start}-${range.end}`
+                            `${SW_DEBUG_PREFIX} range stream closed (abort) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
                     controller.close();
@@ -348,7 +350,7 @@ export function createRangeStream(
                 if (done) {
                     if (enableLogging && pathname) {
                         logger.debug(
-                            `serveRangeRequests plugin: range stream finished (source done) for ${pathname} bytes ${range.start}-${range.end}`
+                            `${SW_DEBUG_PREFIX} range stream finished (source done) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
                     controller.close();
@@ -364,7 +366,7 @@ export function createRangeStream(
                 if (chunkStart > range.end) {
                     if (enableLogging && pathname) {
                         logger.debug(
-                            `serveRangeRequests plugin: range stream finished (range complete) for ${pathname} bytes ${range.start}-${range.end}`
+                            `${SW_DEBUG_PREFIX} range stream finished (range complete) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
                     controller.close();
@@ -382,7 +384,7 @@ export function createRangeStream(
         cancel(): void {
             if (enableLogging && pathname) {
                 logger.debug(
-                    `serveRangeRequests plugin: range stream cancelled (consumer cancelled) for ${pathname} bytes ${range.start}-${range.end}`
+                    `${SW_DEBUG_PREFIX} range stream cancelled (consumer cancelled) for ${pathname} bytes ${range.start}-${range.end}`
                 );
             }
             reader.cancel().catch(() => {});

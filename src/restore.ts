@@ -5,6 +5,7 @@ import {
 } from '@budarin/pluggable-serviceworker/utils';
 
 import type { Pathname, UrlString } from './types.js';
+import { SW_DEBUG_PREFIX } from './logging.js';
 
 export interface RestoreOptions {
     getCache: () => Promise<Cache>;
@@ -46,7 +47,7 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
             if (await matchByUrl(cache, new Request(cacheRequestUrl))) {
                 if (enableLogging) {
                     logger.debug(
-                        `serveRangeRequests plugin: restore skipped for ${pathname} (already in cache)`
+                        `${SW_DEBUG_PREFIX} restore skipped for ${pathname} (already in cache)`
                     );
                 }
                 return;
@@ -61,7 +62,7 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
 
             if (enableLogging) {
                 logger.debug(
-                    `serveRangeRequests plugin: restore fetch for ${pathname} (full file, no Range)`
+                    `${SW_DEBUG_PREFIX} restore fetch for ${pathname} (full file, no Range)`
                 );
             }
 
@@ -71,7 +72,7 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
                 await cache.put(new Request(cacheRequestUrl), response);
                 if (enableLogging) {
                     logger.debug(
-                        `serveRangeRequests plugin: cache put done for ${pathname} cacheName=${cacheName}`
+                        `${SW_DEBUG_PREFIX} cache put done for ${pathname} cacheName=${cacheName}`
                     );
                 }
             } else {
@@ -88,7 +89,7 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
             restoreInProgress.delete(pathname);
             if (enableLogging) {
                 logger.debug(
-                    `serveRangeRequests plugin: restore finished for ${pathname}`
+                    `${SW_DEBUG_PREFIX} restore finished for ${pathname}`
                 );
             }
         }
