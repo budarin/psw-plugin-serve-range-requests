@@ -1,6 +1,6 @@
 {
     "name": "@budarin/psw-plugin-serve-range-requests",
-    "version": "1.0.39",
+    "version": "1.0.40",
     "author": "Vadim Budarin",
     "description": "Service Worker plugin for @budarin/pluggable-serviceworker that serves HTTP Range requests for cached files",
     "license": "MIT",
@@ -26,12 +26,12 @@
         "@budarin/http-constants": "^1.0.22"
     },
     "devDependencies": {
-        "@budarin/pluggable-serviceworker": "^1.17.5",
+        "@budarin/pluggable-serviceworker": "^1.17.6",
         "@types/serviceworker": "^0.0.193",
         "@types/web": "^0.0.342",
         "prettier": "^3.6.2",
         "typescript": "^5.9.3",
-        "vitest": "^4.0.18"
+        "vitest": "^4.1.0"
     },
     "scripts": {
         "build": "tsc",

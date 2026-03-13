@@ -13,7 +13,7 @@ export interface RestoreOptions {
     enableLogging: boolean;
     cacheName: string;
     restoreInProgress: Set<Pathname>;
-    logger?: Logger | undefined;
+    logger: Logger;
 }
 
 /**
@@ -45,7 +45,7 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
             const cacheRequestUrl = normalizeUrl(pathname);
             if (await matchByUrl(cache, new Request(cacheRequestUrl))) {
                 if (enableLogging) {
-                    logger?.debug?.(
+                    logger.debug(
                         `serveRangeRequests plugin: restore skipped for ${pathname} (already in cache)`
                     );
                 }
@@ -60,7 +60,7 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
             });
 
             if (enableLogging) {
-                logger?.debug?.(
+                logger.debug(
                     `serveRangeRequests plugin: restore fetch for ${pathname} (full file, no Range)`
                 );
             }
@@ -70,24 +70,24 @@ export function startRestore(url: UrlString, options: RestoreOptions): void {
             if (response.ok) {
                 await cache.put(new Request(cacheRequestUrl), response);
                 if (enableLogging) {
-                    logger?.debug?.(
+                    logger.debug(
                         `serveRangeRequests plugin: cache put done for ${pathname} cacheName=${cacheName}`
                     );
                 }
             } else {
-                logger?.warn?.(
+                logger.warn(
                     `serveRangeRequests plugin: restore failed for ${pathname} (response not ok) status=${response.status}`
                 );
             }
         } catch (error) {
-            logger?.warn?.(
+            logger.warn(
                 `serveRangeRequests plugin: restore error for ${pathname}`,
                 error
             );
         } finally {
             restoreInProgress.delete(pathname);
             if (enableLogging) {
-                logger?.debug?.(
+                logger.debug(
                     `serveRangeRequests plugin: restore finished for ${pathname}`
                 );
             }

@@ -289,7 +289,7 @@ export function shouldProcessFile(
 export interface CreateRangeStreamOptions {
     enableLogging?: boolean;
     pathname?: string;
-    logger?: Logger | undefined;
+    logger: Logger;
 }
 
 /**
@@ -301,12 +301,12 @@ export interface CreateRangeStreamOptions {
 export function createRangeStream(
     sourceStream: ReadableStream<Uint8Array>,
     range: Range,
-    signal?: AbortSignal,
-    options?: CreateRangeStreamOptions
+    options: CreateRangeStreamOptions,
+    signal?: AbortSignal
 ): ReadableStream<Uint8Array> {
     const reader = sourceStream.getReader();
     let position = 0;
-    const { enableLogging = false, pathname = '', logger } = options ?? {};
+    const { enableLogging = false, pathname = '', logger } = options;
 
     if (signal) {
         signal.addEventListener(
@@ -324,7 +324,7 @@ export function createRangeStream(
             while (true) {
                 if (signal?.aborted) {
                     if (enableLogging && pathname) {
-                        logger?.debug?.(
+                        logger.debug(
                             `serveRangeRequests plugin: range stream closed (abort) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
@@ -336,7 +336,7 @@ export function createRangeStream(
                     chunk = await reader.read();
                 } catch (readError) {
                     if (pathname) {
-                        logger?.warn?.(
+                        logger.warn(
                             `serveRangeRequests plugin: range stream closed (read error) for ${pathname} bytes ${range.start}-${range.end}:`,
                             readError
                         );
@@ -347,7 +347,7 @@ export function createRangeStream(
                 const { done, value } = chunk;
                 if (done) {
                     if (enableLogging && pathname) {
-                        logger?.debug?.(
+                        logger.debug(
                             `serveRangeRequests plugin: range stream finished (source done) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
@@ -363,7 +363,7 @@ export function createRangeStream(
                 }
                 if (chunkStart > range.end) {
                     if (enableLogging && pathname) {
-                        logger?.debug?.(
+                        logger.debug(
                             `serveRangeRequests plugin: range stream finished (range complete) for ${pathname} bytes ${range.start}-${range.end}`
                         );
                     }
@@ -381,7 +381,7 @@ export function createRangeStream(
         },
         cancel(): void {
             if (enableLogging && pathname) {
-                logger?.debug?.(
+                logger.debug(
                     `serveRangeRequests plugin: range stream cancelled (consumer cancelled) for ${pathname} bytes ${range.start}-${range.end}`
                 );
             }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.40] - 2026-03-13
+
+### Changed
+
+- **PluginContext logger**: Updated for the new `PluginContext` contract where `logger` is required: removed optional chaining (`logger?.debug?.`) and made internal contexts require `logger`.
+
 ## [1.0.39] - 2026-03-11
 
 ### Changed

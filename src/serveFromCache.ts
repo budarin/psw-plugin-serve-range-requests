@@ -21,7 +21,7 @@ export interface ServeRangeFromCachedOptions {
     fileMetadataCache: Map<Pathname, FileMetadata>;
     /** Метаданные, уже извлечённые из cachedResponse (избегаем повторного парсинга заголовков). */
     precomputedMetadata?: FileMetadata | undefined;
-    logger?: Logger | undefined;
+    logger: Logger;
 }
 
 export interface ServeRangeResult {
@@ -79,7 +79,7 @@ export function serveRangeFromCachedResponse(
     }
     if (!metadata) {
         if (enableLogging) {
-            logger?.debug?.(
+            logger.debug(
                 `serveRangeRequests plugin: skipping ${pathname} (no valid metadata)`
             );
         }
@@ -96,7 +96,7 @@ export function serveRangeFromCachedResponse(
 
     if (!cachedResponse.body) {
         if (enableLogging) {
-            logger?.debug?.(
+            logger.debug(
                 `serveRangeRequests plugin: skipping ${pathname} (cached response has no body)`
             );
         }
@@ -108,8 +108,8 @@ export function serveRangeFromCachedResponse(
     const stream = createRangeStream(
         cachedResponse.body,
         range,
-        workSignal,
-        { enableLogging, pathname, logger }
+        { enableLogging, pathname, logger },
+        workSignal
     );
 
     const headers = buildRangeResponseHeaders(

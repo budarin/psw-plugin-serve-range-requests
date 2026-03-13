@@ -155,7 +155,7 @@ interface RangeHandlerContext {
     clientId: string;
     maxTrackedUrls: number;
     /** Логгер из контракта плагина (context.logger). */
-    logger?: Logger | undefined;
+    logger: Logger;
 }
 
 /** Результат успешной попытки ответа из полного кэша. */
@@ -284,7 +284,10 @@ export function serveRangeRequests(
     });
 
     /** Базовый контекст обработчика (без restoreOptions — они зависят от event). */
-    const baseHandlerContext: Omit<RangeHandlerContext, 'restoreOptions'> = {
+    const baseHandlerContext: Omit<
+        RangeHandlerContext,
+        'restoreOptions' | 'logger'
+    > = {
         getCache,
         cacheName,
         enableLogging,
@@ -326,7 +329,7 @@ export function serveRangeRequests(
      * Ограничивает размер кеша метаданных: вытесняется запись, вставленная раньше всех (FIFO).
      * Лимит = maxCachedRanges.
      */
-    function manageMetadataCacheSize(logger?: Logger): void {
+    function manageMetadataCacheSize(logger: Logger): void {
         if (maxCachedRanges <= 0) {
             return;
         }
@@ -335,7 +338,7 @@ export function serveRangeRequests(
             if (firstKey) {
                 fileMetadataCache.delete(firstKey);
                 if (enableLogging) {
-                    logger?.debug?.(`Metadata cache: removed old entry ${firstKey}`);
+                    logger.debug(`Metadata cache: removed old entry ${firstKey}`);
                 }
             }
         }
@@ -357,7 +360,7 @@ export function serveRangeRequests(
     /**
      * Освобождает место в rangeCache при достижении лимита (FIFO — вытесняется самый старый).
      */
-    function evictOneRangeCacheEntry(logger?: Logger): void {
+    function evictOneRangeCacheEntry(logger: Logger): void {
         if (maxCachedRanges <= 0 || rangeCache.size < maxCachedRanges) {
             return;
         }
@@ -365,7 +368,7 @@ export function serveRangeRequests(
         if (firstKey) {
             rangeCache.delete(firstKey);
             if (enableLogging) {
-                logger?.debug?.(
+                logger.debug(
                     `Range cache: evicted ${firstKey} (limit ${maxCachedRanges})`
                 );
             }
@@ -431,14 +434,14 @@ export function serveRangeRequests(
                     return undefined;
                 }
                 ctx.invalidateCache();
-                ctx.logger?.error?.(
+                ctx.logger.error(
                     'serveRangeRequests plugin: matchByPathname failed',
                     matchError
                 );
                 return undefined;
             }
             if (ctx.enableLogging) {
-                ctx.logger?.debug?.(
+                ctx.logger.debug(
                     `serveRangeRequests plugin: matchByPathname cacheName=${ctx.cacheName} pathname=${pathname} result=${cachedResponse ? 'found' : 'null'}`
                 );
             }
@@ -456,7 +459,7 @@ export function serveRangeRequests(
                     startRestore(request.url, ctx.restoreOptions);
                 }
                 if (ctx.enableLogging) {
-                    ctx.logger?.debug?.(
+                    ctx.logger.debug(
                         `serveRangeRequests plugin: skipping ${pathname} (file not in cache), returning passthrough response`
                     );
                 }
@@ -467,7 +470,7 @@ export function serveRangeRequests(
             const setForClient = ctx.urlsServedFromNetworkByClient.get(ctx.clientId);
             if (setForClient?.has(pathname)) {
                 if (ctx.enableLogging) {
-                    ctx.logger?.debug?.(
+                    ctx.logger.debug(
                         `serveRangeRequests plugin: ${pathname} already served from network for this client, passthrough (Chromium bug workaround)`
                     );
                 }
@@ -477,7 +480,7 @@ export function serveRangeRequests(
             const cachedMetadata = extractMetadataFromResponse(cachedResponse);
             if (cachedMetadata && getRangeRequestSource(request, cachedMetadata) === 'network') {
                 if (ctx.enableLogging) {
-                    ctx.logger?.debug?.(
+                    ctx.logger.debug(
                         `serveRangeRequests plugin: ${pathname} client has network validator (If-Range), passthrough (Chromium bug workaround)`
                     );
                 }
@@ -510,7 +513,7 @@ export function serveRangeRequests(
                 ctx.invalidateCache();
             }
             if (!isAbort) {
-                ctx.logger?.error?.(
+                ctx.logger.error(
                     `serveRangeRequests plugin error for ${pathname} with range ${rangeHeader}:`,
                     error
                 );
@@ -547,7 +550,7 @@ export function serveRangeRequests(
 
             // Только запросы из браузера (clientId есть); запросы из SW или без клиента не обрабатываем
             if (!event.clientId) {
-                context.logger?.warn?.(
+                context.logger.warn(
                     'serveRangeRequests plugin: skipping request without clientId (not from browser)',
                     request.url
                 );
@@ -558,7 +561,7 @@ export function serveRangeRequests(
 
             if (signal.aborted) {
                 if (enableLogging) {
-                    context.logger?.debug?.(
+                    context.logger.debug(
                         `serveRangeRequests plugin: abort handling for ${request.url} (signal already aborted)`
                     );
                 }
@@ -572,7 +575,7 @@ export function serveRangeRequests(
 
             const requestUrl = parseUrlSafely(request.url);
             if (requestUrl === null) {
-                context.logger?.warn?.(
+                context.logger.warn(
                     'serveRangeRequests plugin: invalid request URL, skipping',
                     request.url
                 );
@@ -580,14 +583,14 @@ export function serveRangeRequests(
             }
             // При заданных include/exclude обрабатываем только same-origin; сторонние URL — варнинг и пропуск
             if (sameOriginOnly && requestUrl.origin !== scopeOrigin) {
-                context.logger?.warn?.(
+                context.logger.warn(
                     `serveRangeRequests plugin: skipping third-party resource (include/exclude set, same-origin only): ${requestUrl.pathname}`
                 );
                 return;
             }
 
             if (!shouldProcessFile(requestUrl.pathname, include, exclude)) {
-                context.logger?.warn?.(
+                context.logger.warn(
                     `serveRangeRequests plugin: skipping (filtered out by include/exclude): ${requestUrl.pathname}`
                 );
                 return;
@@ -606,7 +609,7 @@ export function serveRangeRequests(
                 const { data, headers } = cachedRange;
 
                 if (enableLogging) {
-                    context.logger?.debug?.(
+                    context.logger.debug(
                         `serveRangeRequests plugin: returning 206 from range cache for ${pathname} data.byteLength=${data.byteLength}`
                     );
                 }
@@ -684,7 +687,7 @@ export function serveRangeRequests(
                     const data = await new Response(stream).arrayBuffer();
                     rangeCache.set(cacheKey, { data, headers });
                     if (enableLogging) {
-                        context.logger?.debug?.(
+                        context.logger.debug(
                             `serveRangeRequests plugin: returning 206 for ${pathname} range size: ${rangeSize} bytes (cached)`
                         );
                     }
@@ -695,7 +698,7 @@ export function serveRangeRequests(
                 }
 
                 if (enableLogging) {
-                    context.logger?.debug?.(
+                    context.logger.debug(
                         `serveRangeRequests plugin: returning 206 for ${pathname} range size: ${rangeSize} bytes`
                     );
                 }
@@ -708,7 +711,7 @@ export function serveRangeRequests(
                 // возвращаем undefined, чтобы Range обработал следующий плагин/сеть.
                 throwIfAborted(signal);
 
-                context.logger?.error?.(
+                context.logger.error(
                     `serveRangeRequests plugin: unexpected error for ${pathname}, returning undefined to allow passthrough:`,
                     err
                 );
